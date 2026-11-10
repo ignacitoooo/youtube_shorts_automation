@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  preparar:
+  generar:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -19,7 +19,7 @@ jobs:
           repository: harry0703/MoneyPrinterTurbo
           path: MoneyPrinterTurbo
 
-      - name: Preparar Python
+      - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -30,55 +30,52 @@ jobs:
           sudo apt-get install -y ffmpeg
 
       - name: Instalar dependencias
+        working-directory: MoneyPrinterTurbo
         run: |
-          cd MoneyPrinterTurbo
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install tomlkit
 
-      - name: Crear configuración segura
+      - name: Configurar API
         working-directory: MoneyPrinterTurbo
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
+          cp config.example.toml config.toml
           python - <<'PY'
-          import os
           import tomlkit
           from pathlib import Path
 
-          gemini = os.environ["GEMINI_API_KEY"]
-          pexels = os.environ["PEXELS_API_KEY"]
+          path = Path("config.toml")
+          config = tomlkit.parse(path.read_text())
 
-          if not gemini or not pexels:
-              raise SystemExit("Falta una clave API")
+          config["app"]["video_source"] = "pexels"
+          config["app"]["pexels_api_keys"] = [
+              __import__("os").environ["PEXELS_API_KEY"]
+          ]
+          config["app"]["litellm_model_name"] = "gemini/gemini-2.5-flash"
+          config["app"]["subtitle_provider"] = "edge"
 
-          config = tomlkit.parse(
-              Path("config.example.toml").read_text()
-          )
+          ui = config["ui"]
+          ui["video_language"] = "English"
+          ui["video_aspect_pexels"] = "9:16"
+          ui["voice_name"] = "en-US-GuyNeural"
+          ui["tts_server"] = "azure-tts-v1"
+          ui["voice_mode"] = "tts"
+          ui["subtitle_enabled"] = True
 
-          app = config["app"]
-          app["video_source"] = "pexels"
-          app["pexels_api_keys"] = [pexels]
-          app["llm_provider"] = "gemini"
-          app["gemini_api_key"] = gemini
-          app["subtitle_provider"] = "edge"
-
-          Path("config.toml").write_text(
-              tomlkit.dumps(config)
-          )
-
-          print("Configuración creada correctamente")
-          print("Gemini: configurado")
-          print("Pexels: configurado")
-          print("Subtítulos: Edge")
+          path.write_text(tomlkit.dumps(config))
+          print("English video configuration prepared.")
           PY
 
-      - name: Comprobar configuración
+      - name: Comprobar opciones de generación
         working-directory: MoneyPrinterTurbo
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python -c "import tomlkit; tomlkit.parse(open('config.toml').read()); print('Configuración TOML válida')"
           python cli.py --help
 
-      - name: Finalizar
-        run: echo "Preparación completada"
+      - name: Guardar información de configuración
+        run: |
+          echo "English Shorts configuration checked."
+          echo "Next topic: 10 Incredible Facts About the Universe"
