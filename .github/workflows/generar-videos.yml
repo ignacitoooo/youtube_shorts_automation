@@ -24,7 +24,7 @@ jobs:
       - name: Preparar Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Instalar FFmpeg
         run: |
@@ -34,10 +34,11 @@ jobs:
       - name: Instalar dependencias
         run: |
           cd MoneyPrinterTurbo
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Preparar entorno
+      - name: Comprobar instalación
         run: |
           cd MoneyPrinterTurbo
-          python -c "import moviepy; print('Dependencias instaladas')"
-
+          python -c "import streamlit; print('Streamlit instalado correctamente')"
+          python -c "import moviepy; print('MoviePy instalado correctamente')"
