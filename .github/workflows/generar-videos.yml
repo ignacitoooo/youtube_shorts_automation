@@ -3,19 +3,17 @@ name: Generar YouTube Shorts
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 8,14,20 * * *"
 
 permissions:
   contents: read
 
 jobs:
-  generar:
+  preparar:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Descargar proyecto
+      - name: Descargar MoneyPrinterTurbo
         uses: actions/checkout@v4
         with:
           repository: harry0703/MoneyPrinterTurbo
@@ -36,9 +34,51 @@ jobs:
           cd MoneyPrinterTurbo
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install tomlkit
 
-      - name: Comprobar instalación
+      - name: Crear configuración segura
+        working-directory: MoneyPrinterTurbo
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
-          cd MoneyPrinterTurbo
-          python -c "import streamlit; print('Streamlit instalado correctamente')"
-          python -c "import moviepy; print('MoviePy instalado correctamente')"
+          python - <<'PY'
+          import os
+          import tomlkit
+          from pathlib import Path
+
+          gemini = os.environ["GEMINI_API_KEY"]
+          pexels = os.environ["PEXELS_API_KEY"]
+
+          if not gemini or not pexels:
+              raise SystemExit("Falta una clave API")
+
+          config = tomlkit.parse(
+              Path("config.example.toml").read_text()
+          )
+
+          app = config["app"]
+          app["video_source"] = "pexels"
+          app["pexels_api_keys"] = [pexels]
+          app["llm_provider"] = "gemini"
+          app["gemini_api_key"] = gemini
+          app["subtitle_provider"] = "edge"
+
+          Path("config.toml").write_text(
+              tomlkit.dumps(config)
+          )
+
+          print("Configuración creada correctamente")
+          print("Gemini: configurado")
+          print("Pexels: configurado")
+          print("Subtítulos: Edge")
+          PY
+
+      - name: Comprobar configuración
+        working-directory: MoneyPrinterTurbo
+        run: |
+          python -c "import tomlkit; tomlkit.parse(open('config.toml').read()); print('Configuración TOML válida')"
+          python cli.py --help
+
+      - name: Finalizar
+        run: echo "Preparación completada"
