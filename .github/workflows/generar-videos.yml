@@ -34,6 +34,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install tomlkit
 
       - name: Configurar API
         working-directory: MoneyPrinterTurbo
@@ -41,41 +42,38 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
-          cp config.example.toml config.toml
           python - <<'PY'
+          import os
           import tomlkit
           from pathlib import Path
 
-          path = Path("config.toml")
+          path = Path("config.example.toml")
           config = tomlkit.parse(path.read_text())
 
           config["app"]["video_source"] = "pexels"
           config["app"]["pexels_api_keys"] = [
-              __import__("os").environ["PEXELS_API_KEY"]
+              os.environ["PEXELS_API_KEY"]
           ]
           config["app"]["litellm_model_name"] = "gemini/gemini-2.5-flash"
-          config["app"]["subtitle_provider"] = "edge"
 
-          ui = config["ui"]
-          ui["video_language"] = "English"
-          ui["video_aspect_pexels"] = "9:16"
-          ui["voice_name"] = "en-US-GuyNeural"
-          ui["tts_server"] = "azure-tts-v1"
-          ui["voice_mode"] = "tts"
-          ui["subtitle_enabled"] = True
+          config["ui"]["video_language"] = "English"
+          config["ui"]["video_aspect"] = "9:16"
+          config["ui"]["voice_name"] = "en-US-GuyNeural"
 
-          path.write_text(tomlkit.dumps(config))
-          print("English video configuration prepared.")
+          Path("config.toml").write_text(
+              tomlkit.dumps(config)
+          )
+
+          print("Configuration created successfully.")
           PY
 
-      - name: Comprobar opciones de generación
+      - name: Comprobar configuración
         working-directory: MoneyPrinterTurbo
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
+          python -c "import tomlkit; print('TOMLKIT OK')"
           python cli.py --help
 
-      - name: Guardar información de configuración
-        run: |
-          echo "English Shorts configuration checked."
-          echo "Next topic: 10 Incredible Facts About the Universe"
+      - name: Finalizar
+        run: echo "Configuration check completed."
