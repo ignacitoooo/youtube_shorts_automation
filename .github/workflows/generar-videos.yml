@@ -47,39 +47,53 @@ jobs:
           import tomlkit
           from pathlib import Path
 
+          gemini = os.environ.get("GEMINI_API_KEY")
+          pexels = os.environ.get("PEXELS_API_KEY")
+
+          if not gemini or not pexels:
+              raise SystemExit("Missing GitHub API secrets")
+
           config = tomlkit.parse(
-              Path("config.example.toml").read_text()
+              Path("config.example.toml").read_text(
+                  encoding="utf-8"
+              )
           )
 
-          config["llm_provider"] = "gemini"
-          config["gemini_api_key"] = os.environ["GEMINI_API_KEY"]
-          config["gemini_model_name"] = "gemini-2.5-flash"
+          app = config["app"]
 
-          config["video_source"] = "pexels"
-          config["pexels_api_keys"] = [
-              os.environ["PEXELS_API_KEY"]
-          ]
+          app["llm_provider"] = "gemini"
+          app["gemini_api_key"] = gemini
+          app["gemini_model_name"] = "gemini-2.5-flash"
 
-          config["subtitle_provider"] = "edge"
+          app["video_source"] = "pexels"
+          app["pexels_api_keys"] = [pexels]
+          app["subtitle_provider"] = "edge"
+
+          config["ui"]["video_language"] = "English"
+          config["ui"]["voice_name"] = "en-US-GuyNeural"
 
           Path("config.toml").write_text(
-              tomlkit.dumps(config)
+              tomlkit.dumps(config),
+              encoding="utf-8"
           )
 
-          print("Gemini provider:", config["llm_provider"])
-          print("Pexels configured.")
-          print("Edge subtitles configured.")
+          assert app["llm_provider"] == "gemini"
+          print("LLM provider: gemini")
+          print("Gemini API configured")
+          print("Pexels API configured")
+          print("English voice configured")
           PY
 
-      - name: Generate first English Short
+      - name: Generate English Short
         working-directory: MoneyPrinterTurbo
         run: |
           python cli.py \
             --video-subject "10 Incredible Facts About the Universe" \
             --video-language en-US \
-            --video-script-prompt "Write an engaging 60-second YouTube Shorts script in natural American English. Include ten fascinating scientifically accurate facts and a strong opening hook." \
+            --video-script-prompt "Write approximately 130 words in natural American English. Include ten scientifically accurate and fascinating facts about the universe. Start with a strong hook. Make the script engaging for a 60-second YouTube Short." \
             --video-source pexels \
             --video-aspect 9:16 \
+            --video-fit-mode cover \
             --voice-name en-US-GuyNeural \
             --subtitle-enabled \
             --subtitle-position bottom \
@@ -87,9 +101,10 @@ jobs:
             --bgm-type none
 
       - name: Upload video
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: first-english-short
           path: MoneyPrinterTurbo/storage/tasks/**/*.mp4
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
