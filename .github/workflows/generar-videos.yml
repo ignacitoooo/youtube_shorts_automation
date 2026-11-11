@@ -1,5 +1,5 @@
 
-name: Generate YouTube Shorts - FREE
+name: Generate YouTube Shorts - Quality V2
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
           pip install -r requirements.txt
           pip install tomlkit
 
-      - name: Configure free video generation
+      - name: Configure Pexels and subtitles
         working-directory: MoneyPrinterTurbo
         env:
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -49,52 +49,70 @@ jobs:
           key = os.environ.get("PEXELS_API_KEY")
 
           if not key:
-              raise SystemExit("PEXELS_API_KEY is missing")
+              raise SystemExit("Missing PEXELS_API_KEY")
 
           config = tomlkit.parse(
               Path("config.example.toml").read_text()
           )
 
-          config["app"]["video_source"] = "pexels"
-          config["app"]["pexels_api_keys"] = [key]
+          app = config["app"]
+          app["video_source"] = "pexels"
+          app["pexels_api_keys"] = [key]
+          app["subtitle_provider"] = "edge"
 
-          config["ui"]["video_language"] = "English"
-          config["ui"]["voice_name"] = "en-US-GuyNeural"
-          config["ui"]["tts_server"] = "azure-tts-v1"
-          config["ui"]["voice_mode"] = "tts"
-          config["ui"]["subtitle_enabled"] = True
+          ui = config["ui"]
+          ui["video_language"] = "English"
+          ui["voice_name"] = "en-US-GuyNeural"
+          ui["subtitle_enabled"] = True
+          ui["subtitle_display_mode"] = "word_by_word"
+          ui["subtitle_animation"] = "pop_spring"
+          ui["font_size"] = 68
+          ui["text_fore_color"] = "#FFE45C"
+          ui["stroke_color"] = "#000000"
+          ui["stroke_width"] = 3
+          ui["subtitle_position"] = "two_thirds_bottom"
 
           Path("config.toml").write_text(
               tomlkit.dumps(config)
           )
 
-          print("Pexels configured.")
-          print("No paid AI API will be used.")
-          print("English male voice selected.")
+          print("Pexels configured")
+          print("Dynamic subtitles configured")
+          print("English male voice preserved")
           PY
 
-      - name: Generate English Short without AI API
+      - name: Generate improved English Short
         working-directory: MoneyPrinterTurbo
         run: |
           python cli.py \
-            --video-script "Did you know the universe is almost 14 billion years old? Here are ten incredible facts about space. First, the Sun contains more than 99 percent of our solar system's mass. Second, sunlight takes about eight minutes to reach Earth. Third, a day on Venus is longer than its year. Fourth, neutron stars are incredibly dense. Fifth, there are billions of galaxies in the observable universe. Sixth, Saturn is less dense than water. Seventh, space contains enormous clouds of gas and dust. Eighth, footprints on the Moon can survive for millions of years. Ninth, the universe is expanding. And tenth, looking at distant stars means looking into the past. Which fact surprised you most? Follow for more amazing discoveries!" \
-            --video-terms "universe, galaxy, stars, planets, nebula, deep space, astronomy" \
+            --video-script "What if I told you the universe is stranger than science fiction? Here are ten incredible facts that will blow your mind. First, the Sun contains more than 99 percent of the mass in our solar system. Second, sunlight takes about eight minutes to reach Earth. Third, a day on Venus lasts longer than its entire year. Fourth, neutron stars are so dense that a tiny amount would weigh billions of tons. Fifth, the observable universe contains billions of galaxies. Sixth, Saturn is less dense than water. Seventh, enormous clouds of gas and dust create the birthplace of stars. Eighth, footprints left on the Moon could survive for millions of years. Ninth, the universe is expanding right now. And tenth, when you look at distant galaxies, you are actually looking into the past. Which fact surprised you most? Follow for more incredible science!" \
+            --video-terms "Sun, solar system, Venus planet, neutron star, distant galaxies, Saturn planet, nebula star formation, Moon surface, expanding universe, deep space galaxies" \
             --video-language en-US \
             --video-source pexels \
             --video-aspect 9:16 \
             --video-fit-mode cover \
+            --video-clip-duration 3 \
+            --video-concat-mode sequential \
+            --video-transition-mode fade-in \
+            --match-materials-to-script \
             --voice-name en-US-GuyNeural \
+            --voice-rate 1.05 \
             --subtitle-enabled \
-            --subtitle-position bottom \
-            --subtitle-display-mode sentence \
+            --subtitle-position two_thirds_bottom \
+            --subtitle-display-mode word_by_word \
+            --subtitle-animation pop_spring \
+            --font-size 68 \
+            --text-fore-color "#FFE45C" \
+            --stroke-color "#000000" \
+            --stroke-width 3 \
             --video-count 1 \
             --bgm-type none
 
-      - name: Upload generated video
+      - name: Upload improved video
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: first-english-short
+          name: improved-english-short-v2
           path: MoneyPrinterTurbo/storage/tasks/**/*.mp4
           if-no-files-found: warn
           retention-days: 7
