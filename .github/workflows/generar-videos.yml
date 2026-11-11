@@ -36,10 +36,10 @@ jobs:
           pip install -r requirements.txt
           pip install tomlkit
 
-      - name: Configure Gemini and Pexels
+      - name: Configure OpenAI and Pexels
         working-directory: MoneyPrinterTurbo
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: |
           python - <<'PY'
@@ -47,60 +47,53 @@ jobs:
           import tomlkit
           from pathlib import Path
 
-          gemini = os.environ.get("GEMINI_API_KEY")
-          pexels = os.environ.get("PEXELS_API_KEY")
+          openai_key = os.environ.get("OPENAI_API_KEY")
+          pexels_key = os.environ.get("PEXELS_API_KEY")
 
-          if not gemini or not pexels:
-              raise SystemExit("Missing GitHub API secrets")
+          if not openai_key or not pexels_key:
+              raise SystemExit("Missing API secrets in GitHub")
 
           config = tomlkit.parse(
-              Path("config.example.toml").read_text(
-                  encoding="utf-8"
-              )
+              Path("config.example.toml").read_text(encoding="utf-8")
           )
 
-          app = config["app"]
+          config["llm_provider"] = "openai"
+          config["openai_api_key"] = openai_key
+          config["openai_model_name"] = "gpt-4o-mini"
 
-          app["llm_provider"] = "gemini"
-          app["gemini_api_key"] = gemini
-          app["gemini_model_name"] = "gemini-2.5-flash"
-
-          app["video_source"] = "pexels"
-          app["pexels_api_keys"] = [pexels]
-          app["subtitle_provider"] = "edge"
-
-          config["ui"]["video_language"] = "English"
-          config["ui"]["voice_name"] = "en-US-GuyNeural"
+          config["video_source"] = "pexels"
+          config["pexels_api_keys"] = [pexels_key]
+          config["subtitle_provider"] = "edge"
 
           Path("config.toml").write_text(
               tomlkit.dumps(config),
               encoding="utf-8"
           )
 
-          assert app["llm_provider"] == "gemini"
-          print("LLM provider: gemini")
-          print("Gemini API configured")
-          print("Pexels API configured")
-          print("English voice configured")
+          print("LLM provider: OpenAI")
+          print("Model: gpt-4o-mini")
+          print("Pexels: configured")
+          print("API keys are not displayed.")
           PY
 
-      - name: Generate English Short
+      - name: Generate first English Short
         working-directory: MoneyPrinterTurbo
         run: |
           python cli.py \
             --video-subject "10 Incredible Facts About the Universe" \
             --video-language en-US \
-            --video-script-prompt "Write approximately 130 words in natural American English. Include ten scientifically accurate and fascinating facts about the universe. Start with a strong hook. Make the script engaging for a 60-second YouTube Short." \
+            --video-script-prompt "Write an engaging YouTube Shorts script in natural American English, approximately 120 to 140 words. Include ten fascinating and scientifically accurate facts about the universe. Start with a powerful hook and finish with a memorable call to action." \
             --video-source pexels \
             --video-aspect 9:16 \
             --video-fit-mode cover \
             --voice-name en-US-GuyNeural \
             --subtitle-enabled \
             --subtitle-position bottom \
+            --subtitle-display-mode sentence \
             --video-count 1 \
             --bgm-type none
 
-      - name: Upload video
+      - name: Upload generated video
         if: always()
         uses: actions/upload-artifact@v4
         with:
