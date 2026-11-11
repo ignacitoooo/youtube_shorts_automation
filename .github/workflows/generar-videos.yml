@@ -47,47 +47,47 @@ jobs:
           import tomlkit
           from pathlib import Path
 
-          openai_key = os.environ.get("OPENAI_API_KEY")
-          pexels_key = os.environ.get("PEXELS_API_KEY")
+          openai_key = os.environ["OPENAI_API_KEY"]
+          pexels_key = os.environ["PEXELS_API_KEY"]
 
           if not openai_key or not pexels_key:
-              raise SystemExit("Missing API secrets")
+              raise SystemExit("Missing API keys")
 
           config = tomlkit.parse(
               Path("config.example.toml").read_text()
           )
 
-          # These settings are at the ROOT of config.toml
-          config["llm_provider"] = "openai"
-          config["openai_api_key"] = openai_key
-          config["openai_model_name"] = "gpt-4o-mini"
+          app = config["app"]
 
-          config["video_source"] = "pexels"
-          config["pexels_api_keys"] = [pexels_key]
-          config["subtitle_provider"] = "edge"
+          app["llm_provider"] = "openai"
+          app["openai_api_key"] = openai_key
+          app["openai_model_name"] = "gpt-4o-mini"
+
+          app["video_source"] = "pexels"
+          app["pexels_api_keys"] = [pexels_key]
+
+          app["subtitle_provider"] = "edge"
 
           Path("config.toml").write_text(
               tomlkit.dumps(config)
           )
 
-          # Read the saved file again and verify its real values
           saved = tomlkit.parse(
               Path("config.toml").read_text()
           )
 
-          print("Actual provider:", saved["llm_provider"])
-          print("Actual model:", saved["openai_model_name"])
-          print("Pexels keys configured:", bool(saved["pexels_api_keys"]))
-          print("Subtitle provider:", saved["subtitle_provider"])
+          actual = saved["app"]
 
-          if saved["llm_provider"] != "openai":
-              raise SystemExit("ERROR: OpenAI provider not saved")
+          print("Provider:", actual["llm_provider"])
+          print("Model:", actual["openai_model_name"])
+          print("OpenAI key present:", bool(actual["openai_api_key"]))
+          print("Pexels configured:", bool(actual["pexels_api_keys"]))
 
-          if not saved["openai_api_key"]:
-              raise SystemExit("ERROR: OpenAI key not saved")
+          assert actual["llm_provider"] == "openai"
+          assert actual["openai_api_key"]
           PY
 
-      - name: Generate first English Short
+      - name: Generate English Short
         working-directory: MoneyPrinterTurbo
         run: |
           python cli.py \
