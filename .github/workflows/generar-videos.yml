@@ -1,5 +1,5 @@
 
-name: Generate YouTube Shorts - Quality V2
+name: Generate The Healthy Years 404 - 3 Shorts
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     steps:
       - name: Download MoneyPrinterTurbo
@@ -47,7 +47,6 @@ jobs:
           from pathlib import Path
 
           key = os.environ.get("PEXELS_API_KEY")
-
           if not key:
               raise SystemExit("Missing PEXELS_API_KEY")
 
@@ -76,17 +75,15 @@ jobs:
               tomlkit.dumps(config)
           )
 
-          print("Pexels configured")
-          print("Dynamic subtitles configured")
-          print("English male voice preserved")
+          print("Channel configuration completed")
           PY
 
-      - name: Generate improved English Short
+      - name: Generate Short 1 - Joint Health
         working-directory: MoneyPrinterTurbo
         run: |
           python cli.py \
-            --video-script "What if I told you the universe is stranger than science fiction? Here are ten incredible facts that will blow your mind. First, the Sun contains more than 99 percent of the mass in our solar system. Second, sunlight takes about eight minutes to reach Earth. Third, a day on Venus lasts longer than its entire year. Fourth, neutron stars are so dense that a tiny amount would weigh billions of tons. Fifth, the observable universe contains billions of galaxies. Sixth, Saturn is less dense than water. Seventh, enormous clouds of gas and dust create the birthplace of stars. Eighth, footprints left on the Moon could survive for millions of years. Ninth, the universe is expanding right now. And tenth, when you look at distant galaxies, you are actually looking into the past. Which fact surprised you most? Follow for more incredible science!" \
-            --video-terms "Sun, solar system, Venus planet, neutron star, distant galaxies, Saturn planet, nebula star formation, Moon surface, expanding universe, deep space galaxies" \
+            --video-script "Are your knees feeling stiff after 50? Here are three gentle habits that may support better joint movement. First, avoid sitting in the same position for too long. Stand up and move regularly. Second, try low-impact activities such as walking or swimming, choosing a level that feels comfortable. Third, include strength exercises suited to your ability, because stronger muscles help support your joints. Never push through sharp or worsening pain. If joint pain is persistent, swollen, or affecting daily life, speak with a healthcare professional. Your age does not mean you have to stop moving. Follow The Healthy Years for more practical health tips." \
+            --video-terms "older adult walking in park, senior stretching, swimming pool exercise, senior fitness, healthy active aging" \
             --video-language en-US \
             --video-source pexels \
             --video-aspect 9:16 \
@@ -108,11 +105,65 @@ jobs:
             --video-count 1 \
             --bgm-type none
 
-      - name: Upload improved video
+      - name: Generate Short 2 - Better Sleep
+        working-directory: MoneyPrinterTurbo
+        run: |
+          python cli.py \
+            --video-script "Waking up tired after 50? A few simple sleep habits may help. First, try going to bed and waking up at a consistent time each day. Second, get natural daylight during the morning. Third, keep your bedroom dark, quiet, and comfortably cool. Try limiting caffeine later in the day, too. Remember, persistent sleep problems or loud snoring with breathing pauses deserve medical attention. Better sleep starts with small, consistent habits. Follow The Healthy Years for more healthy aging tips." \
+            --video-terms "senior waking up in bedroom, morning sunlight through window, peaceful bedroom, older adult relaxing, healthy sleep routine" \
+            --video-language en-US \
+            --video-source pexels \
+            --video-aspect 9:16 \
+            --video-fit-mode cover \
+            --video-clip-duration 3 \
+            --video-concat-mode sequential \
+            --video-transition-mode fade-in \
+            --match-materials-to-script \
+            --voice-name en-US-GuyNeural \
+            --voice-rate 1.05 \
+            --subtitle-enabled \
+            --subtitle-position two_thirds_bottom \
+            --subtitle-display-mode word_by_word \
+            --subtitle-animation pop_spring \
+            --font-size 68 \
+            --text-fore-color "#FFE45C" \
+            --stroke-color "#000000" \
+            --stroke-width 3 \
+            --video-count 1 \
+            --bgm-type none
+
+      - name: Generate Short 3 - Brain Health
+        working-directory: MoneyPrinterTurbo
+        run: |
+          python cli.py \
+            --video-script "Want to support your brain health as you get older? Start with everyday habits. Keep learning something new, whether it is a language, an instrument, or a new skill. Stay socially connected with friends and family. Aim for regular physical activity that suits your abilities. And make time for consistent, restful sleep. These habits support overall health, although no single activity can guarantee prevention of memory problems. If you notice persistent changes in memory or thinking, talk to your healthcare professional. Take care of your brain, one day at a time. Follow The Healthy Years." \
+            --video-terms "older adult reading book, senior learning new skill, elderly friends talking, senior walking outdoors, healthy brain aging" \
+            --video-language en-US \
+            --video-source pexels \
+            --video-aspect 9:16 \
+            --video-fit-mode cover \
+            --video-clip-duration 3 \
+            --video-concat-mode sequential \
+            --video-transition-mode fade-in \
+            --match-materials-to-script \
+            --voice-name en-US-GuyNeural \
+            --voice-rate 1.05 \
+            --subtitle-enabled \
+            --subtitle-position two_thirds_bottom \
+            --subtitle-display-mode word_by_word \
+            --subtitle-animation pop_spring \
+            --font-size 68 \
+            --text-fore-color "#FFE45C" \
+            --stroke-color "#000000" \
+            --stroke-width 3 \
+            --video-count 1 \
+            --bgm-type none
+
+      - name: Upload all three Shorts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: improved-english-short-v2
+          name: healthy-years-404-three-shorts
           path: MoneyPrinterTurbo/storage/tasks/**/*.mp4
           if-no-files-found: warn
           retention-days: 7
