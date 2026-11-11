@@ -51,12 +51,13 @@ jobs:
           pexels_key = os.environ.get("PEXELS_API_KEY")
 
           if not openai_key or not pexels_key:
-              raise SystemExit("Missing API secrets in GitHub")
+              raise SystemExit("Missing API secrets")
 
           config = tomlkit.parse(
-              Path("config.example.toml").read_text(encoding="utf-8")
+              Path("config.example.toml").read_text()
           )
 
+          # These settings are at the ROOT of config.toml
           config["llm_provider"] = "openai"
           config["openai_api_key"] = openai_key
           config["openai_model_name"] = "gpt-4o-mini"
@@ -66,14 +67,24 @@ jobs:
           config["subtitle_provider"] = "edge"
 
           Path("config.toml").write_text(
-              tomlkit.dumps(config),
-              encoding="utf-8"
+              tomlkit.dumps(config)
           )
 
-          print("LLM provider: OpenAI")
-          print("Model: gpt-4o-mini")
-          print("Pexels: configured")
-          print("API keys are not displayed.")
+          # Read the saved file again and verify its real values
+          saved = tomlkit.parse(
+              Path("config.toml").read_text()
+          )
+
+          print("Actual provider:", saved["llm_provider"])
+          print("Actual model:", saved["openai_model_name"])
+          print("Pexels keys configured:", bool(saved["pexels_api_keys"]))
+          print("Subtitle provider:", saved["subtitle_provider"])
+
+          if saved["llm_provider"] != "openai":
+              raise SystemExit("ERROR: OpenAI provider not saved")
+
+          if not saved["openai_api_key"]:
+              raise SystemExit("ERROR: OpenAI key not saved")
           PY
 
       - name: Generate first English Short
@@ -82,7 +93,7 @@ jobs:
           python cli.py \
             --video-subject "10 Incredible Facts About the Universe" \
             --video-language en-US \
-            --video-script-prompt "Write an engaging YouTube Shorts script in natural American English, approximately 120 to 140 words. Include ten fascinating and scientifically accurate facts about the universe. Start with a powerful hook and finish with a memorable call to action." \
+            --video-script-prompt "Write an engaging 120 to 140 word YouTube Shorts script in natural American English. Include ten fascinating scientifically accurate facts about the universe. Start with a powerful hook and finish with a memorable call to action." \
             --video-source pexels \
             --video-aspect 9:16 \
             --video-fit-mode cover \
