@@ -36,7 +36,7 @@ jobs:
           pip install -r requirements.txt
           pip install tomlkit
 
-      - name: Configure APIs
+      - name: Configure Gemini and Pexels
         working-directory: MoneyPrinterTurbo
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -51,42 +51,45 @@ jobs:
               Path("config.example.toml").read_text()
           )
 
+          config["llm_provider"] = "gemini"
+          config["gemini_api_key"] = os.environ["GEMINI_API_KEY"]
+          config["gemini_model_name"] = "gemini-2.5-flash"
+
+          config["video_source"] = "pexels"
           config["pexels_api_keys"] = [
               os.environ["PEXELS_API_KEY"]
           ]
-          config["litellm_model_name"] = "gemini/gemini-2.5-flash"
+
           config["subtitle_provider"] = "edge"
 
           Path("config.toml").write_text(
               tomlkit.dumps(config)
           )
 
-          print("API configuration ready.")
+          print("Gemini provider:", config["llm_provider"])
+          print("Pexels configured.")
+          print("Edge subtitles configured.")
           PY
 
-      - name: Generate English space video
+      - name: Generate first English Short
         working-directory: MoneyPrinterTurbo
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python cli.py \
             --video-subject "10 Incredible Facts About the Universe" \
             --video-language en-US \
-            --video-script-prompt "Create an engaging YouTube Shorts narration of approximately 120 to 140 words, suitable for about 60 seconds. Write in natural American English. Start with a powerful hook, present ten fascinating and scientifically accurate facts about the universe, and finish with a memorable call to action." \
+            --video-script-prompt "Write an engaging 60-second YouTube Shorts script in natural American English. Include ten fascinating scientifically accurate facts and a strong opening hook." \
             --video-source pexels \
             --video-aspect 9:16 \
-            --video-fit-mode cover \
             --voice-name en-US-GuyNeural \
             --subtitle-enabled \
             --subtitle-position bottom \
-            --subtitle-display-mode sentence \
             --video-count 1 \
             --bgm-type none
 
-      - name: Upload generated video
+      - name: Upload video
         uses: actions/upload-artifact@v4
         with:
-          name: first-english-youtube-short
+          name: first-english-short
           path: MoneyPrinterTurbo/storage/tasks/**/*.mp4
           if-no-files-found: error
           retention-days: 7
