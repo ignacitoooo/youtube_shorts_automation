@@ -1,5 +1,5 @@
 
-name: The Healthy Years 404 - Generate and Upload 3 Shorts
+name: The Healthy Years 404 - Generate and Publish 3 Shorts
 
 on:
   workflow_dispatch:
@@ -76,6 +76,7 @@ jobs:
           Path("config.toml").write_text(
               tomlkit.dumps(config)
           )
+
           print("Configuration completed")
           PY
 
@@ -176,7 +177,7 @@ jobs:
           test -n "$VIDEO"
           cp "$VIDEO" upload_queue/03-brain-health.mp4
 
-      - name: Upload Shorts to YouTube as PRIVATE
+      - name: Upload Shorts to YouTube as PUBLIC
         working-directory: MoneyPrinterTurbo
         env:
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
@@ -202,7 +203,9 @@ jobs:
               if not os.environ.get(name):
                   raise SystemExit(f"Missing GitHub secret: {name}")
 
-          scopes = ["https://www.googleapis.com/auth/youtube.upload"]
+          scopes = [
+              "https://www.googleapis.com/auth/youtube.upload"
+          ]
 
           credentials = Credentials(
               token=None,
@@ -290,7 +293,7 @@ jobs:
                       "defaultLanguage": "en",
                   },
                   "status": {
-                      "privacyStatus": "private",
+                      "privacyStatus": "public",
                       "selfDeclaredMadeForKids": False,
                   },
               }
@@ -309,8 +312,10 @@ jobs:
               )
 
               response = None
+
               while response is None:
                   status, response = request.next_chunk()
+
                   if status:
                       print(
                           f"{item['title']}: "
@@ -322,7 +327,8 @@ jobs:
                   f"https://www.youtube.com/watch?v={response['id']}"
               )
 
-          print("All three videos uploaded as PRIVATE.")
+          print("All three videos uploaded as PUBLIC.")
+
           PY
 
       - name: Save generated videos as artifacts
