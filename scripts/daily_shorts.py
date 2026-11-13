@@ -20,9 +20,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 
-# Gemini model. If Google changes model availability, this can be
-# overridden with the GEMINI_MODEL GitHub Actions variable.
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 FEEDS = [
     (
@@ -66,9 +64,7 @@ def clean_text(value):
 def fetch_feed(label, url):
     request = urllib.request.Request(
         url,
-        headers={
-            "User-Agent": "TheHealthyYears404/1.0"
-        },
+        headers={"User-Agent": "TheHealthyYears404/1.0"},
     )
 
     try:
@@ -81,12 +77,11 @@ def fetch_feed(label, url):
     try:
         root = ET.fromstring(raw)
     except ET.ParseError:
-        print(f"WARNING: Invalid RSS feed: {label}")
+        print(f"WARNING: Invalid feed: {label}")
         return []
 
     items = []
 
-    # RSS format
     for node in root.findall(".//item"):
         title = clean_text(node.findtext("title", ""))
         link = clean_text(node.findtext("link", ""))
@@ -102,7 +97,6 @@ def fetch_feed(label, url):
                 "summary": summary[:1800],
             })
 
-    # Atom format
     namespace = {
         "atom": "http://www.w3.org/2005/Atom"
     }
@@ -144,19 +138,15 @@ def load_history():
 
     if not HISTORY.exists():
         with HISTORY.open(
-            "w",
-            newline="",
-            encoding="utf-8"
+            "w", newline="", encoding="utf-8"
         ) as file:
             writer = csv.DictWriter(
-                file,
-                fieldnames=HISTORY_FIELDS
+                file, fieldnames=HISTORY_FIELDS
             )
             writer.writeheader()
 
     with HISTORY.open(
-        newline="",
-        encoding="utf-8"
+        newline="", encoding="utf-8"
     ) as file:
         return list(csv.DictReader(file))
 
@@ -171,73 +161,61 @@ def call_gemini(feed_items, history):
     ]
 
     prompt = f"""
-You are the health content researcher and scriptwriter
-for the YouTube channel "The Healthy Years 404".
+You are the health researcher and scriptwriter for
+the YouTube channel The Healthy Years 404.
 
 AUDIENCE:
 Adults over 50 interested in healthy aging.
 
 LANGUAGE:
-All titles, scripts and descriptions must be in natural US English.
+Write titles, spoken scripts and descriptions in natural US English.
 
-YOUR TASK:
+TASK:
 Study the recent official research and health news supplied below.
-Choose THREE different, useful topics for three separate YouTube Shorts.
+Choose THREE different and useful topics for three separate YouTube Shorts.
 
-Topics can include:
-- Healthy aging
-- Heart health
-- Sleep
-- Nutrition
-- Brain health
-- Memory
-- Bone health
-- Joint mobility
-- Hearing and vision
-- Balance and fall prevention
-- Mental wellbeing
-- Physical activity
-- Preventive health
+Possible subjects include:
+heart health, sleep, nutrition, brain health, memory, bone health,
+joint mobility, hearing, vision, balance, fall prevention,
+mental wellbeing, physical activity and preventive health.
 
 RESEARCH RULES:
-Use the supplied articles as your research sources.
-Prefer recent and relevant information.
-Do not invent research or statistics.
-Do not present animal studies as proven human benefits.
-Do not promise cures or guaranteed prevention.
-Use cautious language such as "may support" when appropriate.
-Include practical, low-risk advice.
-If evidence is preliminary, make that clear.
+- Base every video on one or more supplied source articles.
+- Prefer recent, relevant research.
+- Do not invent statistics, studies or medical facts.
+- Do not present animal studies as proven human benefits.
+- Do not promise cures or guaranteed prevention.
+- Explain uncertainty and preliminary findings honestly.
+- Give practical, low-risk information.
+- Include an educational medical disclaimer in each description.
 
-VERY IMPORTANT: AVOID REPEATING CONTENT.
-
-The publication history below contains videos already published.
-Do not repeat their topics, angles, or practical advice.
+AVOID REPEATING CONTENT:
+The publication history below is authoritative.
+Do not repeat an old subject, angle or practical takeaway.
 Changing the title does not make an old topic new.
 Avoid close variations of previously covered subjects.
-
-If three genuinely different topics cannot be found,
+If fewer than three genuinely different topics are supported,
 return fewer than three. Never invent topics to fill the quota.
 
-OFFICIAL RESEARCH FEEDS:
+OFFICIAL RESEARCH ITEMS:
 {json.dumps(feed_items, ensure_ascii=False)}
 
-PREVIOUSLY PUBLISHED VIDEOS:
+PREVIOUSLY PUBLISHED:
 {json.dumps(previous, ensure_ascii=False)}
 
-RETURN ONLY VALID JSON, using this structure:
+Return ONLY valid JSON in this exact structure:
 
 {{
   "videos": [
     {{
       "topic": "short topic description",
       "title": "YouTube Shorts title under 70 characters",
-      "script": "Complete spoken English script, around 90 to 125 words",
+      "script": "Complete spoken English script, 90 to 125 words",
       "visual_terms": "5 to 8 Pexels search phrases in English, separated by commas",
       "description": "English description, educational disclaimer and hashtags",
       "tags": ["tag one", "tag two"],
       "source_urls": [
-        "Exact article URL copied from the supplied research feeds"
+        "Exact article URL copied from the supplied research items"
       ]
     }}
   ]
@@ -276,19 +254,17 @@ RETURN ONLY VALID JSON, using this structure:
 
     try:
         with urllib.request.urlopen(
-            request,
-            timeout=180
+            request, timeout=180
         ) as response:
             data = json.loads(response.read().decode("utf-8"))
 
     except urllib.error.HTTPError as exc:
         details = exc.read().decode(
-            "utf-8",
-            errors="replace"
+            "utf-8", errors="replace"
         )
         raise RuntimeError(
             f"Gemini API error {exc.code}: {details[:1500]}"
-        )
+        ) from exc
 
     parts = (
         data.get("candidates", [{}])[0]
@@ -306,10 +282,10 @@ RETURN ONLY VALID JSON, using this structure:
 
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         raise RuntimeError(
             "Gemini did not return valid JSON: " + text[:1000]
-        )
+        ) from exc
 
 
 def normalize(value):
@@ -328,8 +304,7 @@ def validate_videos(result, feed_items, history):
         )
 
     allowed_urls = {
-        item["url"]
-        for item in feed_items
+        item["url"] for item in feed_items
     }
 
     old_topics = {
@@ -385,7 +360,6 @@ def validate_videos(result, feed_items, history):
             continue
 
         video["source_urls"] = valid_urls
-
         accepted.append(video)
         seen_topics.add(topic)
         seen_titles.add(title)
@@ -396,17 +370,14 @@ def validate_videos(result, feed_items, history):
     if len(accepted) != 3:
         raise RuntimeError(
             f"Only {len(accepted)} valid new scripts passed validation. "
-            "No videos will be uploaded today."
+            "No videos will be uploaded."
         )
 
     return accepted
 
 
 def render_video(item, index):
-    UPLOAD_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     task_folder = VIDEO_DIR / "storage/tasks"
 
@@ -418,53 +389,31 @@ def render_video(item, index):
     command = [
         sys.executable,
         "cli.py",
-        "--video-script",
-        item["script"],
-        "--video-terms",
-        item["visual_terms"],
-        "--video-language",
-        "en-US",
-        "--video-source",
-        "pexels",
-        "--video-aspect",
-        "9:16",
-        "--video-fit-mode",
-        "cover",
-        "--video-clip-duration",
-        "3",
-        "--video-concat-mode",
-        "sequential",
-        "--video-transition-mode",
-        "fade-in",
+        "--video-script", item["script"],
+        "--video-terms", item["visual_terms"],
+        "--video-language", "en-US",
+        "--video-source", "pexels",
+        "--video-aspect", "9:16",
+        "--video-fit-mode", "cover",
+        "--video-clip-duration", "3",
+        "--video-concat-mode", "sequential",
+        "--video-transition-mode", "fade-in",
         "--match-materials-to-script",
-        "--voice-name",
-        "en-US-GuyNeural",
-        "--voice-rate",
-        "1.05",
+        "--voice-name", "en-US-GuyNeural",
+        "--voice-rate", "1.05",
         "--subtitle-enabled",
-        "--subtitle-position",
-        "two_thirds_bottom",
-        "--subtitle-display-mode",
-        "word_by_word",
-        "--subtitle-animation",
-        "pop_spring",
-        "--font-size",
-        "68",
-        "--text-fore-color",
-        "#FFE45C",
-        "--stroke-color",
-        "#000000",
-        "--stroke-width",
-        "3",
-        "--video-count",
-        "1",
-        "--bgm-type",
-        "none",
+        "--subtitle-position", "two_thirds_bottom",
+        "--subtitle-display-mode", "word_by_word",
+        "--subtitle-animation", "pop_spring",
+        "--font-size", "68",
+        "--text-fore-color", "#FFE45C",
+        "--stroke-color", "#000000",
+        "--stroke-width", "3",
+        "--video-count", "1",
+        "--bgm-type", "none",
     ]
 
-    print(
-        f"Generating video {index}/3: {item['title']}"
-    )
+    print(f"Generating {index}/3: {item['title']}")
 
     subprocess.run(
         command,
@@ -473,14 +422,13 @@ def render_video(item, index):
     )
 
     candidates = [
-        path
-        for path in task_folder.rglob("*.mp4")
+        path for path in task_folder.rglob("*.mp4")
         if path.is_file() and path.resolve() not in before
     ]
 
     if not candidates:
         raise RuntimeError(
-            "No new MP4 was created by MoneyPrinterTurbo."
+            "MoneyPrinterTurbo did not create a new MP4."
         )
 
     latest = max(
@@ -538,8 +486,7 @@ def upload_one(youtube, item, video_path):
             "title": item["title"][:100],
             "description": item["description"][:5000],
             "tags": [
-                str(tag)[:30]
-                for tag in tags[:20]
+                str(tag)[:30] for tag in tags[:20]
             ],
             "categoryId": "26",
             "defaultLanguage": "en",
@@ -600,13 +547,10 @@ def append_history(item, video_id, video_url):
     )
 
     with HISTORY.open(
-        "a",
-        newline="",
-        encoding="utf-8"
+        "a", newline="", encoding="utf-8"
     ) as file:
         writer = csv.DictWriter(
-            file,
-            fieldnames=HISTORY_FIELDS
+            file, fieldnames=HISTORY_FIELDS
         )
 
         if not exists:
@@ -633,14 +577,11 @@ def main():
     feed_items = []
 
     for label, url in FEEDS:
-        feed_items.extend(
-            fetch_feed(label, url)
-        )
+        feed_items.extend(fetch_feed(label, url))
 
-    unique_items = {}
-
-    for item in feed_items:
-        unique_items[item["url"]] = item
+    unique_items = {
+        item["url"]: item for item in feed_items
+    }
 
     feed_items = list(unique_items.values())[:60]
 
@@ -650,52 +591,31 @@ def main():
             "from the NIH feeds. No videos will be uploaded."
         )
 
-    print(
-        f"Loaded {len(history)} previous publications."
-    )
+    print(f"Loaded {len(history)} previous publications.")
+    print(f"Retrieved {len(feed_items)} research articles.")
 
-    print(
-        f"Retrieved {len(feed_items)} research articles."
-    )
-
-    result = call_gemini(
-        feed_items,
-        history
-    )
+    result = call_gemini(feed_items, history)
 
     videos = validate_videos(
-        result,
-        feed_items,
-        history
+        result, feed_items, history
     )
 
     print("Today's selected topics:")
 
     for index, item in enumerate(videos, 1):
-        print(
-            f"{index}. {item['topic']} - {item['title']}"
-        )
+        print(f"{index}. {item['topic']} - {item['title']}")
 
     youtube = make_youtube_client()
 
     for index, item in enumerate(videos, 1):
-        video_path = render_video(
-            item,
-            index
-        )
+        video_path = render_video(item, index)
 
         video_id, video_url = upload_one(
-            youtube,
-            item,
-            video_path
+            youtube, item, video_path
         )
 
-        # Save each successful upload immediately.
-        append_history(
-            item,
-            video_id,
-            video_url
-        )
+        # Record each video immediately after successful upload.
+        append_history(item, video_id, video_url)
 
     print(
         "All three new Shorts have been uploaded publicly."
