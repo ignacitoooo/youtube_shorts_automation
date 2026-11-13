@@ -20,7 +20,11 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 
-MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+# OpenRouter free model router.
+# This requests free models only.
+MODEL = "openrouter/free"
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 FEEDS = [
     (
@@ -33,8 +37,14 @@ FEEDS = [
     ),
 ]
 
-HISTORY = Path(os.getenv("HISTORY_FILE", "data/historial_videos.csv"))
-VIDEO_DIR = Path(os.getenv("VIDEO_WORKDIR", "MoneyPrinterTurbo"))
+HISTORY = Path(
+    os.getenv("HISTORY_FILE", "data/historial_videos.csv")
+)
+
+VIDEO_DIR = Path(
+    os.getenv("VIDEO_WORKDIR", "MoneyPrinterTurbo")
+)
+
 UPLOAD_DIR = VIDEO_DIR / "upload_queue"
 
 HISTORY_FIELDS = [
@@ -48,10 +58,15 @@ HISTORY_FIELDS = [
 
 
 def require_env(*names):
-    missing = [name for name in names if not os.getenv(name)]
+    missing = [
+        name for name in names
+        if not os.getenv(name)
+    ]
+
     if missing:
         raise SystemExit(
-            "Missing GitHub secrets: " + ", ".join(missing)
+            "Missing GitHub secrets: "
+            + ", ".join(missing)
         )
 
 
@@ -64,29 +79,50 @@ def clean_text(value):
 def fetch_feed(label, url):
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "TheHealthyYears404/1.0"},
+        headers={
+            "User-Agent": "TheHealthyYears404/1.0"
+        },
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(
+            request,
+            timeout=30
+        ) as response:
             raw = response.read()
+
     except Exception as exc:
-        print(f"WARNING: Could not read {label}: {exc}")
+        print(
+            f"WARNING: Could not read {label}: {exc}"
+        )
         return []
 
     try:
         root = ET.fromstring(raw)
+
     except ET.ParseError:
         print(f"WARNING: Invalid feed: {label}")
         return []
 
     items = []
 
+    # RSS format
     for node in root.findall(".//item"):
-        title = clean_text(node.findtext("title", ""))
-        link = clean_text(node.findtext("link", ""))
-        summary = clean_text(node.findtext("description", ""))
-        published = clean_text(node.findtext("pubDate", ""))
+        title = clean_text(
+            node.findtext("title", "")
+        )
+
+        link = clean_text(
+            node.findtext("link", "")
+        )
+
+        summary = clean_text(
+            node.findtext("description", "")
+        )
+
+        published = clean_text(
+            node.findtext("pubDate", "")
+        )
 
         if title and link:
             items.append({
@@ -97,16 +133,28 @@ def fetch_feed(label, url):
                 "summary": summary[:1800],
             })
 
+    # Atom format
     namespace = {
         "atom": "http://www.w3.org/2005/Atom"
     }
 
-    for node in root.findall(".//atom:entry", namespace):
+    for node in root.findall(
+        ".//atom:entry",
+        namespace
+    ):
         title = clean_text(
-            node.findtext("atom:title", "", namespace)
+            node.findtext(
+                "atom:title",
+                "",
+                namespace
+            )
         )
 
-        link_node = node.find("atom:link", namespace)
+        link_node = node.find(
+            "atom:link",
+            namespace
+        )
+
         link = (
             link_node.get("href", "")
             if link_node is not None
@@ -114,11 +162,19 @@ def fetch_feed(label, url):
         )
 
         summary = clean_text(
-            node.findtext("atom:summary", "", namespace)
+            node.findtext(
+                "atom:summary",
+                "",
+                namespace
+            )
         )
 
         published = clean_text(
-            node.findtext("atom:published", "", namespace)
+            node.findtext(
+                "atom:published",
+                "",
+                namespace
+            )
         )
 
         if title and link:
@@ -134,24 +190,31 @@ def fetch_feed(label, url):
 
 
 def load_history():
-    HISTORY.parent.mkdir(parents=True, exist_ok=True)
+    HISTORY.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     if not HISTORY.exists():
         with HISTORY.open(
-            "w", newline="", encoding="utf-8"
+            "w",
+            newline="",
+            encoding="utf-8"
         ) as file:
             writer = csv.DictWriter(
-                file, fieldnames=HISTORY_FIELDS
+                file,
+                fieldnames=HISTORY_FIELDS
             )
             writer.writeheader()
 
     with HISTORY.open(
-        newline="", encoding="utf-8"
+        newline="",
+        encoding="utf-8"
     ) as file:
         return list(csv.DictReader(file))
 
 
-def call_gemini(feed_items, history):
+def call_openrouter(feed_items, history):
     previous = [
         {
             "topic": row.get("topic", ""),
@@ -168,24 +231,40 @@ AUDIENCE:
 Adults over 50 interested in healthy aging.
 
 LANGUAGE:
-Write titles, spoken scripts and descriptions in natural US English.
+Write titles, spoken scripts and descriptions
+in natural US English.
 
-TASK:
-Study the recent official research and health news supplied below.
-Choose THREE different and useful topics for three separate YouTube Shorts.
+YOUR TASK:
+Study the recent official research and health news
+supplied below.
+
+Choose THREE different and useful topics for
+three separate YouTube Shorts.
 
 Possible subjects include:
-heart health, sleep, nutrition, brain health, memory, bone health,
-joint mobility, hearing, vision, balance, fall prevention,
-mental wellbeing, physical activity and preventive health.
+- Heart health
+- Sleep
+- Nutrition
+- Brain health
+- Memory
+- Bone health
+- Joint mobility
+- Hearing
+- Vision
+- Balance
+- Fall prevention
+- Mental wellbeing
+- Physical activity
+- Preventive health
+- Healthy aging
 
 RESEARCH RULES:
-- Base every video on one or more supplied source articles.
-- Prefer recent, relevant research.
-- Do not invent statistics, studies or medical facts.
+- Base every video on the supplied source articles.
+- Prefer recent and relevant research.
+- Do not invent statistics or medical facts.
 - Do not present animal studies as proven human benefits.
 - Do not promise cures or guaranteed prevention.
-- Explain uncertainty and preliminary findings honestly.
+- Explain uncertainty honestly.
 - Give practical, low-risk information.
 - Include an educational medical disclaimer in each description.
 
@@ -194,16 +273,18 @@ The publication history below is authoritative.
 Do not repeat an old subject, angle or practical takeaway.
 Changing the title does not make an old topic new.
 Avoid close variations of previously covered subjects.
-If fewer than three genuinely different topics are supported,
-return fewer than three. Never invent topics to fill the quota.
+
+If three genuinely different topics are not supported,
+return fewer than three.
+Never invent topics to fill the quota.
 
 OFFICIAL RESEARCH ITEMS:
 {json.dumps(feed_items, ensure_ascii=False)}
 
-PREVIOUSLY PUBLISHED:
+PREVIOUSLY PUBLISHED VIDEOS:
 {json.dumps(previous, ensure_ascii=False)}
 
-Return ONLY valid JSON in this exact structure:
+Return ONLY valid JSON in this structure:
 
 {{
   "videos": [
@@ -223,88 +304,153 @@ Return ONLY valid JSON in this exact structure:
 """
 
     payload = {
-        "contents": [
+        "model": MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a careful health research "
+                    "assistant. Follow the user's requested "
+                    "JSON format exactly. Never invent sources."
+                ),
+            },
             {
                 "role": "user",
-                "parts": [{"text": prompt}],
-            }
+                "content": prompt,
+            },
         ],
-        "generationConfig": {
-            "temperature": 0.5,
-            "responseMimeType": "application/json",
-            "maxOutputTokens": 8192,
-        },
+        "temperature": 0.5,
+        "max_tokens": 8000,
     }
 
-    endpoint = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        + MODEL
-        + ":generateContent"
-    )
-
     request = urllib.request.Request(
-        endpoint,
+        OPENROUTER_URL,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "x-goog-api-key": os.environ["GEMINI_API_KEY"],
+            "Authorization": (
+                "Bearer "
+                + os.environ["OPENROUTER_API_KEY"]
+            ),
+            "HTTP-Referer": (
+                "https://github.com/"
+                "youtube_shorts_automation"
+            ),
+            "X-Title": "The Healthy Years 404",
         },
         method="POST",
     )
 
     try:
         with urllib.request.urlopen(
-            request, timeout=180
+            request,
+            timeout=180
         ) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
 
     except urllib.error.HTTPError as exc:
         details = exc.read().decode(
-            "utf-8", errors="replace"
+            "utf-8",
+            errors="replace"
         )
+
         raise RuntimeError(
-            f"Gemini API error {exc.code}: {details[:1500]}"
+            f"OpenRouter API error {exc.code}: "
+            f"{details[:2000]}"
         ) from exc
 
-    parts = (
-        data.get("candidates", [{}])[0]
-        .get("content", {})
-        .get("parts", [])
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not contact OpenRouter: {exc}"
+        ) from exc
+
+    choices = data.get("choices", [])
+
+    if not choices:
+        raise RuntimeError(
+            "OpenRouter returned no choices: "
+            + json.dumps(data)[:1500]
+        )
+
+    text = choices[0].get(
+        "message", {}
+    ).get("content", "")
+
+    if isinstance(text, list):
+        text = "".join(
+            part.get("text", "")
+            for part in text
+            if isinstance(part, dict)
+        )
+
+    text = str(text).strip()
+
+    # Remove optional Markdown code fences.
+    text = re.sub(
+        r"^```(?:json)?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE
     )
 
-    text = "".join(
-        part.get("text", "")
-        for part in parts
-    ).strip()
+    text = re.sub(
+        r"\s*```$",
+        "",
+        text
+    )
 
     if not text:
-        raise RuntimeError("Gemini returned an empty response.")
+        raise RuntimeError(
+            "OpenRouter returned an empty response."
+        )
 
     try:
         return json.loads(text)
+
     except json.JSONDecodeError as exc:
         raise RuntimeError(
-            "Gemini did not return valid JSON: " + text[:1000]
+            "OpenRouter did not return valid JSON: "
+            + text[:1500]
         ) from exc
 
 
 def normalize(value):
     value = (value or "").lower()
-    value = re.sub(r"[^a-z0-9 ]", " ", value)
-    return re.sub(r"\s+", " ", value).strip()
+    value = re.sub(
+        r"[^a-z0-9 ]",
+        " ",
+        value
+    )
+    return re.sub(
+        r"\s+",
+        " ",
+        value
+    ).strip()
 
 
-def validate_videos(result, feed_items, history):
+def validate_videos(
+    result,
+    feed_items,
+    history
+):
     videos = result.get("videos", [])
 
-    if not isinstance(videos, list) or len(videos) < 3:
+    if not isinstance(videos, list):
+        raise RuntimeError(
+            "The AI response has no valid videos list."
+        )
+
+    if len(videos) < 3:
         raise RuntimeError(
             "Fewer than three new topics were found. "
             "No videos will be uploaded today."
         )
 
     allowed_urls = {
-        item["url"] for item in feed_items
+        item["url"]
+        for item in feed_items
     }
 
     old_topics = {
@@ -331,7 +477,10 @@ def validate_videos(result, feed_items, history):
             "source_urls",
         ]
 
-        if not all(video.get(key) for key in required):
+        if not all(
+            video.get(key)
+            for key in required
+        ):
             continue
 
         topic = normalize(video["topic"])
@@ -340,26 +489,45 @@ def validate_videos(result, feed_items, history):
         if not topic or not title:
             continue
 
-        if topic in old_topics or title in old_titles:
+        if topic in old_topics:
+            print(
+                f"Repeated topic rejected: {topic}"
+            )
             continue
 
-        if topic in seen_topics or title in seen_titles:
+        if title in old_titles:
+            print(
+                f"Repeated title rejected: {title}"
+            )
+            continue
+
+        if (
+            topic in seen_topics
+            or title in seen_titles
+        ):
             continue
 
         valid_urls = [
-            url for url in video["source_urls"]
+            url
+            for url in video["source_urls"]
             if url in allowed_urls
         ]
 
         if not valid_urls:
+            print(
+                f"Rejected without valid source: {title}"
+            )
             continue
 
-        word_count = len(video["script"].split())
+        word_count = len(
+            video["script"].split()
+        )
 
         if word_count < 70 or word_count > 160:
             continue
 
         video["source_urls"] = valid_urls
+
         accepted.append(video)
         seen_topics.add(topic)
         seen_titles.add(title)
@@ -369,17 +537,25 @@ def validate_videos(result, feed_items, history):
 
     if len(accepted) != 3:
         raise RuntimeError(
-            f"Only {len(accepted)} valid new scripts passed validation. "
-            "No videos will be uploaded."
+            f"Only {len(accepted)} valid new scripts "
+            "passed validation. No videos will be uploaded."
         )
 
     return accepted
 
 
 def render_video(item, index):
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOAD_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     task_folder = VIDEO_DIR / "storage/tasks"
+
+    task_folder.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
     before = {
         path.resolve()
@@ -389,31 +565,76 @@ def render_video(item, index):
     command = [
         sys.executable,
         "cli.py",
-        "--video-script", item["script"],
-        "--video-terms", item["visual_terms"],
-        "--video-language", "en-US",
-        "--video-source", "pexels",
-        "--video-aspect", "9:16",
-        "--video-fit-mode", "cover",
-        "--video-clip-duration", "3",
-        "--video-concat-mode", "sequential",
-        "--video-transition-mode", "fade-in",
+
+        "--video-script",
+        item["script"],
+
+        "--video-terms",
+        item["visual_terms"],
+
+        "--video-language",
+        "en-US",
+
+        "--video-source",
+        "pexels",
+
+        "--video-aspect",
+        "9:16",
+
+        "--video-fit-mode",
+        "cover",
+
+        "--video-clip-duration",
+        "3",
+
+        "--video-concat-mode",
+        "sequential",
+
+        "--video-transition-mode",
+        "fade-in",
+
         "--match-materials-to-script",
-        "--voice-name", "en-US-GuyNeural",
-        "--voice-rate", "1.05",
+
+        "--voice-name",
+        "en-US-GuyNeural",
+
+        "--voice-rate",
+        "1.05",
+
         "--subtitle-enabled",
-        "--subtitle-position", "two_thirds_bottom",
-        "--subtitle-display-mode", "word_by_word",
-        "--subtitle-animation", "pop_spring",
-        "--font-size", "68",
-        "--text-fore-color", "#FFE45C",
-        "--stroke-color", "#000000",
-        "--stroke-width", "3",
-        "--video-count", "1",
-        "--bgm-type", "none",
+
+        "--subtitle-position",
+        "two_thirds_bottom",
+
+        "--subtitle-display-mode",
+        "word_by_word",
+
+        "--subtitle-animation",
+        "pop_spring",
+
+        "--font-size",
+        "68",
+
+        "--text-fore-color",
+        "#FFE45C",
+
+        "--stroke-color",
+        "#000000",
+
+        "--stroke-width",
+        "3",
+
+        "--video-count",
+        "1",
+
+        "--bgm-type",
+        "none",
     ]
 
-    print(f"Generating {index}/3: {item['title']}")
+    print(
+        f"Generating video {index}/3: "
+        f"{item['title']}"
+    )
 
     subprocess.run(
         command,
@@ -422,8 +643,12 @@ def render_video(item, index):
     )
 
     candidates = [
-        path for path in task_folder.rglob("*.mp4")
-        if path.is_file() and path.resolve() not in before
+        path
+        for path in task_folder.rglob("*.mp4")
+        if (
+            path.is_file()
+            and path.resolve() not in before
+        )
     ]
 
     if not candidates:
@@ -446,7 +671,9 @@ def render_video(item, index):
         f"{index:02d}-{safe_name}.mp4"
     )
 
-    destination.write_bytes(latest.read_bytes())
+    destination.write_bytes(
+        latest.read_bytes()
+    )
 
     return destination
 
@@ -475,7 +702,11 @@ def make_youtube_client():
     )
 
 
-def upload_one(youtube, item, video_path):
+def upload_one(
+    youtube,
+    item,
+    video_path
+):
     tags = item.get("tags", [])
 
     if not isinstance(tags, list):
@@ -486,7 +717,8 @@ def upload_one(youtube, item, video_path):
             "title": item["title"][:100],
             "description": item["description"][:5000],
             "tags": [
-                str(tag)[:30] for tag in tags[:20]
+                str(tag)[:30]
+                for tag in tags[:20]
             ],
             "categoryId": "26",
             "defaultLanguage": "en",
@@ -523,22 +755,34 @@ def upload_one(youtube, item, video_path):
 
     video_id = response["id"]
 
-    return (
-        video_id,
+    video_url = (
         f"https://www.youtube.com/watch?v={video_id}"
     )
 
+    return video_id, video_url
 
-def append_history(item, video_id, video_url):
+
+def append_history(
+    item,
+    video_id,
+    video_url
+):
     new_row = {
         "date_utc": dt.datetime.now(
             dt.timezone.utc
         ).isoformat(timespec="seconds"),
+
         "topic": item["topic"],
+
         "title": item["title"],
+
         "video_id": video_id,
+
         "video_url": video_url,
-        "source_urls": " ".join(item["source_urls"]),
+
+        "source_urls": " ".join(
+            item["source_urls"]
+        ),
     }
 
     exists = (
@@ -547,10 +791,14 @@ def append_history(item, video_id, video_url):
     )
 
     with HISTORY.open(
-        "a", newline="", encoding="utf-8"
+        "a",
+        newline="",
+        encoding="utf-8"
     ) as file:
+
         writer = csv.DictWriter(
-            file, fieldnames=HISTORY_FIELDS
+            file,
+            fieldnames=HISTORY_FIELDS
         )
 
         if not exists:
@@ -559,13 +807,14 @@ def append_history(item, video_id, video_url):
         writer.writerow(new_row)
 
     print(
-        f"HISTORY SAVED: {item['title']} | {video_url}"
+        f"HISTORY SAVED: "
+        f"{item['title']} | {video_url}"
     )
 
 
 def main():
     require_env(
-        "GEMINI_API_KEY",
+        "OPENROUTER_API_KEY",
         "PEXELS_API_KEY",
         "YT_CLIENT_ID",
         "YT_CLIENT_SECRET",
@@ -577,45 +826,76 @@ def main():
     feed_items = []
 
     for label, url in FEEDS:
-        feed_items.extend(fetch_feed(label, url))
+        feed_items.extend(
+            fetch_feed(label, url)
+        )
 
     unique_items = {
-        item["url"]: item for item in feed_items
+        item["url"]: item
+        for item in feed_items
     }
 
-    feed_items = list(unique_items.values())[:60]
+    feed_items = list(
+        unique_items.values()
+    )[:60]
 
     if len(feed_items) < 3:
         raise RuntimeError(
-            "Not enough research articles could be retrieved "
-            "from the NIH feeds. No videos will be uploaded."
+            "Not enough research articles could be "
+            "retrieved from the NIH feeds. "
+            "No videos will be uploaded."
         )
 
-    print(f"Loaded {len(history)} previous publications.")
-    print(f"Retrieved {len(feed_items)} research articles.")
+    print(
+        f"Loaded {len(history)} previous publications."
+    )
 
-    result = call_gemini(feed_items, history)
+    print(
+        f"Retrieved {len(feed_items)} research articles."
+    )
+
+    print(
+        "Requesting three new scripts from OpenRouter..."
+    )
+
+    result = call_openrouter(
+        feed_items,
+        history
+    )
 
     videos = validate_videos(
-        result, feed_items, history
+        result,
+        feed_items,
+        history
     )
 
     print("Today's selected topics:")
 
     for index, item in enumerate(videos, 1):
-        print(f"{index}. {item['topic']} - {item['title']}")
+        print(
+            f"{index}. {item['topic']} - {item['title']}"
+        )
 
     youtube = make_youtube_client()
 
     for index, item in enumerate(videos, 1):
-        video_path = render_video(item, index)
-
-        video_id, video_url = upload_one(
-            youtube, item, video_path
+        video_path = render_video(
+            item,
+            index
         )
 
-        # Record each video immediately after successful upload.
-        append_history(item, video_id, video_url)
+        video_id, video_url = upload_one(
+            youtube,
+            item,
+            video_path
+        )
+
+        # Save immediately after each successful upload.
+        append_history(
+            item,
+            video_id,
+            video_url
+        )
 
     print(
         "All three new Shorts have been uploaded publicly."
