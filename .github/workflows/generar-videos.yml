@@ -59,7 +59,10 @@ jobs:
           if not key:
               raise SystemExit("Missing PEXELS_API_KEY")
 
-          config = tomlkit.parse(Path("config.example.toml").read_text())
+          config = tomlkit.parse(
+              Path("config.example.toml").read_text()
+          )
+
           app = config["app"]
           app["video_source"] = "pexels"
           app["pexels_api_keys"] = [key]
@@ -77,7 +80,10 @@ jobs:
           ui["stroke_width"] = 3
           ui["subtitle_position"] = "two_thirds_bottom"
 
-          Path("config.toml").write_text(tomlkit.dumps(config))
+          Path("config.toml").write_text(
+              tomlkit.dumps(config)
+          )
+
           print("Configuration completed")
           PY
 
@@ -104,7 +110,7 @@ jobs:
           retention-days: 7
 
       - name: Commit publication history
-        if: success()
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
