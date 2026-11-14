@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout channel repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download MoneyPrinterTurbo
         uses: actions/checkout@v4
@@ -111,13 +113,35 @@ jobs:
 
       - name: Commit publication history
         if: always()
+        env:
+          BRANCH: ${{ github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add data/historial_videos.csv
-          if ! git diff --cached --quiet; then
-            git commit -m "Update YouTube Shorts publication history"
-            git push
-          else
+
+          if git diff --cached --quiet; then
             echo "No history changes to commit"
+            exit 0
           fi
+
+          git commit -m "Update YouTube Shorts publication history"
+
+          for attempt in 1 2 3; do
+            echo "Push attempt $attempt/3"
+
+            git fetch origin "$BRANCH"
+
+            git rebase "origin/$BRANCH"
+
+            if git push origin "HEAD:$BRANCH"; then
+              echo "Publication history successfully saved."
+              exit 0
+            fi
+
+            echo "Push rejected. Will synchronize and retry."
+          done
+
+          echo "Could not save publication history after 3 attempts."
+          exit 1
