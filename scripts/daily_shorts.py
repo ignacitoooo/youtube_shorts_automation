@@ -29,44 +29,17 @@ MODEL = "openrouter/free"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 FEEDS = [
-    (
-        "NIH News Releases",
-        "https://www.nih.gov/news-releases/feed.xml",
-    ),
-    (
-        "NIH Research Matters",
-        "https://www.nih.gov/nih-research-matters/feed.xml",
-    ),
-    (
-        "NIH News in Health",
-        "https://newsinhealth.nih.gov/rss",
-    ),
-    (
-        "ScienceDaily Health and Medicine",
-        "https://www.sciencedaily.com/rss/health_medicine.xml",
-    ),
-    (
-        "BBC Health",
-        "https://feeds.bbci.co.uk/news/health/rss.xml",
-    ),
-    (
-        "NPR Health",
-        "https://feeds.npr.org/1128/rss.xml",
-    ),
+    ("NIH News Releases", "https://www.nih.gov/news-releases/feed.xml"),
+    ("NIH Research Matters", "https://www.nih.gov/nih-research-matters/feed.xml"),
+    ("NIH News in Health", "https://newsinhealth.nih.gov/rss"),
+    ("ScienceDaily Health and Medicine", "https://www.sciencedaily.com/rss/health_medicine.xml"),
+    ("BBC Health", "https://feeds.bbci.co.uk/news/health/rss.xml"),
+    ("NPR Health", "https://feeds.npr.org/1128/rss.xml"),
 ]
 
-HISTORY = Path(
-    os.getenv("HISTORY_FILE", "data/historial_videos.csv")
-)
-
-PENDING_FILE = Path(
-    os.getenv("PENDING_FILE", "data/pendientes_publicacion.json")
-)
-
-VIDEO_DIR = Path(
-    os.getenv("VIDEO_WORKDIR", "MoneyPrinterTurbo")
-)
-
+HISTORY = Path(os.getenv("HISTORY_FILE", "data/historial_videos.csv"))
+PENDING_FILE = Path(os.getenv("PENDING_FILE", "data/pendientes_publicacion.json"))
+VIDEO_DIR = Path(os.getenv("VIDEO_WORKDIR", "MoneyPrinterTurbo"))
 UPLOAD_DIR = VIDEO_DIR / "upload_queue"
 
 HISTORY_FIELDS = [
@@ -84,11 +57,7 @@ HISTORY_FIELDS = [
 # ============================================================
 
 def require_env(*names):
-    missing = [
-        name for name in names
-        if not os.getenv(name)
-    ]
-
+    missing = [name for name in names if not os.getenv(name)]
     if missing:
         raise RuntimeError(
             "Missing GitHub secrets: " + ", ".join(missing)
@@ -111,17 +80,11 @@ def load_history():
     HISTORY.parent.mkdir(parents=True, exist_ok=True)
 
     if not HISTORY.exists():
-        with HISTORY.open(
-            "w", newline="", encoding="utf-8"
-        ) as file:
-            writer = csv.DictWriter(
-                file, fieldnames=HISTORY_FIELDS
-            )
+        with HISTORY.open("w", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=HISTORY_FIELDS)
             writer.writeheader()
 
-    with HISTORY.open(
-        newline="", encoding="utf-8"
-    ) as file:
+    with HISTORY.open(newline="", encoding="utf-8") as file:
         return list(csv.DictReader(file))
 
 
@@ -138,18 +101,14 @@ def fetch_feed(label, url):
     )
 
     try:
-        with urllib.request.urlopen(
-            request, timeout=30
-        ) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:
             raw = response.read()
-
     except Exception as exc:
         print(f"WARNING: Could not read {label}: {exc}")
         return []
 
     try:
         root = ET.fromstring(raw)
-
     except ET.ParseError:
         print(f"WARNING: Invalid feed: {label}")
         return []
@@ -173,9 +132,7 @@ def fetch_feed(label, url):
             })
 
     # Atom
-    namespace = {
-        "atom": "http://www.w3.org/2005/Atom"
-    }
+    namespace = {"atom": "http://www.w3.org/2005/Atom"}
 
     for node in root.findall(".//atom:entry", namespace):
         title = clean_text(
@@ -183,12 +140,7 @@ def fetch_feed(label, url):
         )
 
         link_node = node.find("atom:link", namespace)
-
-        link = (
-            link_node.get("href", "")
-            if link_node is not None
-            else ""
-        )
+        link = link_node.get("href", "") if link_node is not None else ""
 
         summary = clean_text(
             node.findtext("atom:summary", "", namespace)
@@ -217,19 +169,13 @@ def get_research():
     for label, url in FEEDS:
         articles.extend(fetch_feed(label, url))
 
-    unique = {}
-
-    for article in articles:
-        unique[article["url"]] = article
-
+    unique = {article["url"]: article for article in articles}
     result = list(unique.values())
 
     print(f"Total unique research articles: {len(result)}")
 
     for article in result:
-        print(
-            f"- [{article['source']}] {article['title']}"
-        )
+        print(f"- [{article['source']}] {article['title']}")
 
     if len(result) < 3:
         raise RuntimeError(
@@ -241,10 +187,11 @@ def get_research():
 
 
 # ============================================================
-# OPENROUTER
+# OPENROUTER - IMPROVED SHORTS SCRIPTWRITER
 # ============================================================
 
 def call_openrouter(feed_items, history):
+    """Generate three research-based Shorts with stronger retention."""
 
     previous = [
         {
@@ -255,82 +202,124 @@ def call_openrouter(feed_items, history):
     ]
 
     prompt = f"""
-You are the health researcher and scriptwriter
+You are the health researcher and YouTube Shorts scriptwriter
 for The Healthy Years 404.
 
-AUDIENCE:
-Adults over 50 interested in healthy aging.
+CHANNEL AND AUDIENCE:
+- Channel: The Healthy Years 404.
+- Audience: adults aged 50 and older, primarily in the United States.
+- Write everything in natural, conversational American English.
 
-LANGUAGE:
-All titles, scripts and descriptions must be
-written in natural American English.
+GOAL:
+Create exactly THREE distinct, useful, scientifically responsible
+YouTube Shorts. Each video should make viewers want to keep watching
+without using misleading clickbait or exaggerating medical findings.
 
-TASK:
-Study ALL supplied health and research articles below,
-from every source. Choose exactly THREE genuinely
-different topics for three separate YouTube Shorts.
-Use credible reporting to identify the research, but
-base factual claims only on what the supplied article
-supports. Prefer original NIH or other research sources
-when available.
+TOPIC PRIORITIES:
+Healthy aging after 50, protein and nutrition, joint and bone health,
+heart health, sleep, brain health and memory, gut health, lung health,
+blood pressure, mobility, balance and practical daily habits.
 
-TOPIC AREAS:
-Heart health, sleep, nutrition, brain health,
-memory, bone health, joint mobility, hearing,
-vision, balance, fall prevention, mental wellbeing,
-physical activity and healthy aging.
+Choose topics with a recognizable problem, a useful takeaway and
+research support in the supplied articles. Use different health
+subjects and angles across the three videos.
 
-RESEARCH RULES:
-- Base each video on the supplied research.
-- Do not invent studies, statistics or medical facts.
-- Do not present animal studies as proven human benefits.
-- Do not promise cures or guaranteed prevention.
-- Explain uncertainty honestly.
-- Give practical, low-risk information.
-- Include an educational disclaimer in each description.
+RETENTION STRUCTURE FOR EACH SCRIPT:
 
-VERY IMPORTANT: AVOID REPEATING CONTENT.
-The publication history below contains topics already
-published by this channel. Do not repeat an existing
-or very similar topic, advice, or research angle.
-A new title does NOT make an old topic new.
+1. FIRST 0-3 SECONDS:
+Start with a direct hook: a relatable problem, surprising but accurate
+finding, common mistake or useful question.
+Do not greet viewers or introduce the channel.
 
-Try to select THREE distinct topics from the full set
-of supplied articles. Each must have a different health
-subject or research angle and different practical takeaways.
+2. BY SECOND 8:
+Deliver the first useful tip or key fact. No long setup.
 
-Never invent research, statistics, medical facts, or sources.
-If the supplied articles truly cannot support three distinct
-videos, return fewer than three rather than inventing content.
+3. MIDDLE:
+Give concise, practical explanations. Use short sentences
+that sound natural when spoken aloud.
 
-PREVIOUSLY PUBLISHED:
+4. OPEN LOOP:
+Early in the script, create honest curiosity about the final tip.
+For example, say that the last habit is often overlooked.
+The final tip must genuinely add value.
+
+5. END:
+Put the strongest or most overlooked takeaway near the end,
+then finish with a very short call to action.
+No long goodbye.
+
+SCRIPT LENGTH:
+- Aim for 95-110 spoken words per script.
+- Acceptable range: 85-120 words.
+- Target video duration: approximately 35-45 seconds.
+- Prefer three useful takeaways when research supports them.
+- Avoid repeated points, filler and long introductions.
+- Write narration, not an article.
+
+VISUAL PACING:
+Provide 8-12 specific English Pexels search phrases.
+Put them in the order they should appear in the video.
+Make them relevant to the narration and suitable for visual
+changes approximately every 3-5 seconds.
+
+Prefer realistic footage of adults 50+, daily activities,
+food, walking, exercise, sleep routines and relevant health visuals.
+Do not use generic or unrelated visual phrases.
+
+TITLES:
+Create a clear, curiosity-driven English title, ideally 45-65 characters.
+Use the benefit, problem or age group when appropriate.
+The title must accurately represent the supplied research.
+
+MEDICAL SAFETY AND ACCURACY:
+- Use only factual claims supported by the supplied articles.
+- Never invent studies, statistics, medical facts or source URLs.
+- Distinguish association from causation.
+- Do not present animal research as proven human benefit.
+- Do not claim that a food, supplement or habit cures disease.
+- Never advise viewers to stop or change prescribed medication.
+- Explain uncertainty when evidence is preliminary.
+- Offer responsible general education, not personal diagnosis.
+
+Include this exact disclaimer in every description:
+"This video is for educational purposes only and is not a substitute
+for professional medical advice."
+
+AVOID REPETITION:
+Do not repeat previously published topics, titles or substantially
+similar research angles. A new title does not make an old topic new.
+
+Previously published videos:
 {json.dumps(previous, ensure_ascii=False)}
 
-SUPPLIED HEALTH AND RESEARCH ARTICLES:
+AVAILABLE RESEARCH ARTICLES:
+Use the supplied articles as the factual basis.
+Every video must cite at least one exact URL from this list.
+Do not invent or alter URLs.
+
 {json.dumps(feed_items, ensure_ascii=False)}
 
-OUTPUT RULES:
-Return ONE complete, syntactically valid JSON object only.
-Do not use Markdown fences or commentary.
-Use double quotes for every JSON key and string.
-Escape quotation marks and newlines inside strings.
-Do not add trailing commas.
-Do not stop before closing every bracket and brace.
+OUTPUT:
+Return one complete valid JSON object only.
+No Markdown and no commentary.
 
-Use exactly this structure:
+Return exactly this structure with exactly three video objects:
+
 {{
   "videos": [
     {{
-      "topic": "short topic description",
-      "title": "YouTube Shorts title under 70 characters",
-      "script": "Complete spoken English script of 90 to 125 words",
-      "visual_terms": "5 to 8 Pexels search phrases separated by commas",
-      "description": "English description with medical disclaimer and hashtags",
-      "tags": ["tag one", "tag two"],
-      "source_urls": ["exact article URL from the supplied articles"]
+      "topic": "Specific health topic",
+      "title": "English YouTube Shorts title",
+      "script": "Complete spoken English script of 85-120 words",
+      "visual_terms": "8-12 English Pexels search phrases separated by commas",
+      "description": "English description including the exact medical disclaimer and relevant hashtags",
+      "tags": ["healthy aging", "health after 50", "wellness"],
+      "source_urls": ["Exact article URL from the supplied articles"]
     }}
   ]
 }}
+
+Ensure every JSON string is properly escaped and the JSON is complete.
 """
 
     api_key = os.environ["OPENROUTER_API_KEY"]
@@ -339,27 +328,22 @@ Use exactly this structure:
         {
             "role": "system",
             "content": (
-                "You are a careful health research assistant and scriptwriter. "
-                "Return one complete valid JSON object only. "
-                "Use all supplied sources when selecting topics. "
-                "Never invent medical research or source URLs. "
-                "Do not repeat previously published topics."
+                "You are a careful health researcher and expert YouTube Shorts "
+                "scriptwriter. Write natural American English, prioritize a "
+                "strong first-three-second hook, early practical value, visual "
+                "pacing and scientific accuracy. Return valid JSON only."
             ),
         },
-        {
-            "role": "user",
-            "content": prompt,
-        },
+        {"role": "user", "content": prompt},
     ]
 
     last_error = None
 
     for attempt in range(1, 4):
-
         payload = {
             "model": MODEL,
             "messages": conversation,
-            "temperature": 0.1,
+            "temperature": 0.2,
             "max_tokens": 16000,
         }
 
@@ -378,30 +362,21 @@ Use exactly this structure:
         print(f"OpenRouter request, attempt {attempt}/3...")
 
         try:
-            with urllib.request.urlopen(
-                request, timeout=240
-            ) as response:
-                data = json.loads(
-                    response.read().decode("utf-8")
-                )
+            with urllib.request.urlopen(request, timeout=240) as response:
+                data = json.loads(response.read().decode("utf-8"))
 
         except urllib.error.HTTPError as exc:
-            details = exc.read().decode(
-                "utf-8", errors="replace"
-            )
+            details = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(
-                f"OpenRouter API error {exc.code}: "
-                f"{details[:2000]}"
+                f"OpenRouter API error {exc.code}: {details[:2000]}"
             ) from exc
 
         except (urllib.error.URLError, TimeoutError) as exc:
             last_error = f"Network error: {exc}"
             print(last_error)
-
-            if attempt == 3:
-                break
-
-            continue
+            if attempt < 3:
+                continue
+            break
 
         choices = data.get("choices", [])
 
@@ -410,31 +385,9 @@ Use exactly this structure:
                 "OpenRouter returned no choices: "
                 + json.dumps(data)[:1500]
             )
-
-            if attempt == 3:
-                break
-
-            conversation.extend([
-                {
-                    "role": "assistant",
-                    "content": "",
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        "Your previous response was empty or invalid. "
-                        "Return the complete JSON object now, "
-                        "following the exact schema. "
-                        "Do not add any explanation."
-                    ),
-                },
-            ])
-
             continue
 
-        choice = choices[0]
-        message = choice.get("message", {})
-        content = message.get("content", "")
+        content = choices[0].get("message", {}).get("content", "")
 
         if isinstance(content, list):
             content = "".join(
@@ -459,11 +412,7 @@ Use exactly this structure:
 
         try:
             if first < 0 or last <= first:
-                raise json.JSONDecodeError(
-                    "No complete JSON object found",
-                    text,
-                    0
-                )
+                raise ValueError("No complete JSON object found")
 
             result = json.loads(text[first:last + 1])
 
@@ -471,16 +420,13 @@ Use exactly this structure:
                 not isinstance(result, dict)
                 or not isinstance(result.get("videos"), list)
             ):
-                raise ValueError(
-                    "JSON must be an object containing a videos list"
-                )
+                raise ValueError("JSON must contain a videos list")
 
-            if not result["videos"]:
-                raise ValueError("The videos list is empty")
+            if len(result["videos"]) < 3:
+                raise ValueError("Fewer than three videos were returned")
 
             print(
-                "OpenRouter returned valid JSON with "
-                f"{len(result['videos'])} video entries."
+                f"OpenRouter returned {len(result['videos'])} video scripts."
             )
 
             return result
@@ -489,7 +435,7 @@ Use exactly this structure:
             last_error = str(exc)
 
             print(
-                f"Invalid OpenRouter JSON on attempt "
+                f"Invalid OpenRouter response on attempt "
                 f"{attempt}: {last_error}"
             )
 
@@ -498,21 +444,17 @@ Use exactly this structure:
                     {
                         "role": "system",
                         "content": (
-                            "You repair JSON. Return only one "
-                            "complete valid JSON object. "
-                            "Preserve the supplied content and schema. "
-                            "Do not use Markdown."
+                            "Repair the supplied response and return "
+                            "one complete valid JSON object only."
                         ),
                     },
                     {
                         "role": "user",
                         "content": (
-                            "The following response is invalid JSON. "
-                            "Correct its syntax, preserve the intended "
-                            "content, and return the complete object "
-                            "with a videos array. Do not truncate it "
-                            "and do not add commentary.\n\n"
-                            + text[:14000]
+                            "Fix this response so it is complete valid JSON "
+                            "with exactly three video objects. Preserve factual "
+                            "content and the required schema. Do not add "
+                            "commentary.\n\n" + text[:14000]
                         ),
                     },
                 ]
@@ -611,7 +553,7 @@ def validate_videos(result, feed_items, history):
 
         word_count = len(video["script"].split())
 
-        if word_count < 70 or word_count > 160:
+        if word_count < 85 or word_count > 120:
             print(
                 f"Rejected script with {word_count} words: {title}"
             )
@@ -772,43 +714,64 @@ def render_video(item, index):
 
 def load_pending():
     """Load scripts waiting for YouTube upload."""
+
     if not PENDING_FILE.exists():
         return []
 
     try:
-        data = json.loads(PENDING_FILE.read_text(encoding="utf-8"))
+        data = json.loads(
+            PENDING_FILE.read_text(encoding="utf-8")
+        )
+
     except (json.JSONDecodeError, OSError) as exc:
         raise RuntimeError(
-            f"Could not read pending publication file {PENDING_FILE}: {exc}"
+            f"Could not read pending publication file "
+            f"{PENDING_FILE}: {exc}"
         ) from exc
 
     if not isinstance(data, list):
-        raise RuntimeError("Pending publication file must contain a JSON list.")
+        raise RuntimeError(
+            "Pending publication file must contain a JSON list."
+        )
 
     return data
 
 
 def save_pending(items):
-    """Persist pending scripts atomically so they survive the next Actions run."""
+    """Persist pending scripts atomically."""
+
     PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
-    temporary = PENDING_FILE.with_suffix(PENDING_FILE.suffix + ".tmp")
+
+    temporary = PENDING_FILE.with_suffix(
+        PENDING_FILE.suffix + ".tmp"
+    )
+
     temporary.write_text(
         json.dumps(items, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
+
     temporary.replace(PENDING_FILE)
-    print(f"PENDING QUEUE SAVED: {len(items)} video(s) waiting.")
+
+    print(
+        f"PENDING QUEUE SAVED: {len(items)} video(s) waiting."
+    )
 
 
 def is_upload_limit_error(exc):
     """Recognize YouTube's daily upload limit response."""
+
     details = str(exc)
     content = getattr(exc, "content", None)
+
     if content:
         if isinstance(content, bytes):
-            details += " " + content.decode("utf-8", errors="replace")
+            details += " " + content.decode(
+                "utf-8", errors="replace"
+            )
         else:
             details += " " + str(content)
+
     return (
         "uploadLimitExceeded" in details
         or "number of videos they may upload" in details.lower()
@@ -966,66 +929,106 @@ def main():
     )
 
     history = load_history()
-    print(f"Loaded {len(history)} previous publications.")
 
-    # If a previous run hit YouTube's upload limit, resume those scripts first.
+    print(
+        f"Loaded {len(history)} previous publications."
+    )
+
+    # Retry pending videos before researching new topics.
     pending = load_pending()
 
     if pending:
         videos = pending
+
         print(
             f"Found {len(videos)} pending video(s). "
             "They will be retried before researching new topics."
         )
+
     else:
         feed_items = get_research()
-        result = call_openrouter(feed_items, history)
-        videos = validate_videos(result, feed_items, history)
+
+        result = call_openrouter(
+            feed_items,
+            history
+        )
+
+        videos = validate_videos(
+            result,
+            feed_items,
+            history
+        )
 
         print("\nTODAY'S SELECTED TOPICS:")
-        for index, item in enumerate(videos, 1):
-            print(f"{index}. {item['topic']} - {item['title']}")
 
-    # Save all scripts before rendering/uploading. If the runner stops,
-    # the scripts remain in the repository and can be retried next time.
+        for index, item in enumerate(videos, 1):
+            print(
+                f"{index}. {item['topic']} - {item['title']}"
+            )
+
+    # Save scripts before rendering and uploading.
     save_pending(videos)
 
     youtube = make_youtube_client()
 
     for index, item in enumerate(videos, 1):
+
         print("")
-        print(f"PROCESSING VIDEO {index}/{len(videos)}")
+        print(
+            f"PROCESSING VIDEO {index}/{len(videos)}"
+        )
 
         try:
-            video_path = render_video(item, index)
-            video_id, video_url = upload_one(youtube, item, video_path)
+            video_path = render_video(
+                item,
+                index
+            )
+
+            video_id, video_url = upload_one(
+                youtube,
+                item,
+                video_path
+            )
 
         except HttpError as exc:
+
             remaining = videos[index - 1:]
             save_pending(remaining)
 
             if is_upload_limit_error(exc):
+
                 print("\nYOUTUBE DAILY UPLOAD LIMIT REACHED.")
+
                 print(
-                    f"{len(remaining)} video(s) have been saved for the next run."
+                    f"{len(remaining)} video(s) "
+                    "have been saved for the next run."
                 )
-                print("This run will finish without losing the pending scripts.")
+
+                print(
+                    "The remaining videos will be retried later."
+                )
+
                 return
 
-            print("Upload failed. Current and remaining videos were saved for retry.")
+            print(
+                "Upload failed. Current and remaining "
+                "videos were saved for retry."
+            )
+
             raise
 
         except Exception:
-            # Preserve the current script and all remaining scripts on any
-            # generation or upload failure. Successfully published videos
-            # have already been removed from this queue below.
+
             save_pending(videos[index - 1:])
             raise
 
-        append_history(item, video_id, video_url)
+        append_history(
+            item,
+            video_id,
+            video_url
+        )
 
-        # Remove the successfully published item immediately. If a later
-        # video fails, only the not-yet-published items remain queued.
+        # Remove successfully uploaded video from pending queue.
         save_pending(videos[index:])
 
     print("\n" + "=" * 60)
