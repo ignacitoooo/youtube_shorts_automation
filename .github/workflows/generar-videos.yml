@@ -97,6 +97,7 @@ jobs:
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
           HISTORY_FILE: data/historial_videos.csv
+          PENDING_FILE: data/pendientes_publicacion.json
           VIDEO_WORKDIR: MoneyPrinterTurbo
         run: python scripts/daily_shorts.py
 
@@ -111,7 +112,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Commit publication history
+      - name: Commit publication history and pending queue
         if: always()
         env:
           BRANCH: ${{ github.ref_name }}
@@ -119,29 +120,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add data/historial_videos.csv
+          git add -A -- data/historial_videos.csv data/pendientes_publicacion.json
 
           if git diff --cached --quiet; then
-            echo "No history changes to commit"
+            echo "No history or pending-queue changes to commit"
             exit 0
           fi
 
-          git commit -m "Update YouTube Shorts publication history"
+          git commit -m "Update Shorts publication history and pending queue"
 
-          for attempt in 1 2 3; do
-            echo "Push attempt $attempt/3"
-
-            git fetch origin "$BRANCH"
-
-            git rebase "origin/$BRANCH"
-
-            if git push origin "HEAD:$BRANCH"; then
-              echo "Publication history successfully saved."
-              exit 0
-            fi
-
-            echo "Push rejected. Will synchronize and retry."
-          done
-
-          echo "Could not save publication history after 3 attempts."
-          exit 1
+          git fetch origin "$BRANCH"
+          git rebase "origin/$BRANCH"
+          git push origin "HEAD:$BRANCH"
