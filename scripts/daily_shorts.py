@@ -17,6 +17,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 
 
 # ============================================================
@@ -56,6 +57,10 @@ FEEDS = [
 
 HISTORY = Path(
     os.getenv("HISTORY_FILE", "data/historial_videos.csv")
+)
+
+PENDING_FILE = Path(
+    os.getenv("PENDING_FILE", "data/pendientes_publicacion.json")
 )
 
 VIDEO_DIR = Path(
@@ -762,6 +767,55 @@ def render_video(item, index):
 
 
 # ============================================================
+# PENDING PUBLICATIONS
+# ============================================================
+
+def load_pending():
+    """Load scripts waiting for YouTube upload."""
+    if not PENDING_FILE.exists():
+        return []
+
+    try:
+        data = json.loads(PENDING_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise RuntimeError(
+            f"Could not read pending publication file {PENDING_FILE}: {exc}"
+        ) from exc
+
+    if not isinstance(data, list):
+        raise RuntimeError("Pending publication file must contain a JSON list.")
+
+    return data
+
+
+def save_pending(items):
+    """Persist pending scripts atomically so they survive the next Actions run."""
+    PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = PENDING_FILE.with_suffix(PENDING_FILE.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
+    temporary.replace(PENDING_FILE)
+    print(f"PENDING QUEUE SAVED: {len(items)} video(s) waiting.")
+
+
+def is_upload_limit_error(exc):
+    """Recognize YouTube's daily upload limit response."""
+    details = str(exc)
+    content = getattr(exc, "content", None)
+    if content:
+        if isinstance(content, bytes):
+            details += " " + content.decode("utf-8", errors="replace")
+        else:
+            details += " " + str(content)
+    return (
+        "uploadLimitExceeded" in details
+        or "number of videos they may upload" in details.lower()
+    )
+
+
+# ============================================================
 # YOUTUBE
 # ============================================================
 
@@ -911,65 +965,73 @@ def main():
         "YT_REFRESH_TOKEN"
     )
 
-    # 1. Read publication history
     history = load_history()
+    print(f"Loaded {len(history)} previous publications.")
 
-    print(
-        f"Loaded {len(history)} previous publications."
-    )
+    # If a previous run hit YouTube's upload limit, resume those scripts first.
+    pending = load_pending()
 
-    # 2. Research health topics
-    feed_items = get_research()
-
-    # 3. Ask OpenRouter for new scripts
-    result = call_openrouter(
-        feed_items,
-        history
-    )
-
-    # 4. Reject repeated or invalid topics
-    videos = validate_videos(
-        result,
-        feed_items,
-        history
-    )
-
-    print("")
-    print("TODAY'S SELECTED TOPICS:")
-
-    for index, item in enumerate(videos, 1):
+    if pending:
+        videos = pending
         print(
-            f"{index}. {item['topic']} - {item['title']}"
+            f"Found {len(videos)} pending video(s). "
+            "They will be retried before researching new topics."
         )
+    else:
+        feed_items = get_research()
+        result = call_openrouter(feed_items, history)
+        videos = validate_videos(result, feed_items, history)
 
-    # 5. Connect to YouTube
+        print("\nTODAY'S SELECTED TOPICS:")
+        for index, item in enumerate(videos, 1):
+            print(f"{index}. {item['topic']} - {item['title']}")
+
+    # Save all scripts before rendering/uploading. If the runner stops,
+    # the scripts remain in the repository and can be retried next time.
+    save_pending(videos)
+
     youtube = make_youtube_client()
 
-    # 6. Generate and upload one at a time
     for index, item in enumerate(videos, 1):
-
         print("")
-        print(f"PROCESSING VIDEO {index}/3")
+        print(f"PROCESSING VIDEO {index}/{len(videos)}")
 
-        video_path = render_video(item, index)
+        try:
+            video_path = render_video(item, index)
+            video_id, video_url = upload_one(youtube, item, video_path)
 
-        video_id, video_url = upload_one(
-            youtube,
-            item,
-            video_path
-        )
+        except HttpError as exc:
+            remaining = videos[index - 1:]
+            save_pending(remaining)
 
-        # Save immediately after successful upload.
-        append_history(
-            item,
-            video_id,
-            video_url
-        )
+            if is_upload_limit_error(exc):
+                print("\nYOUTUBE DAILY UPLOAD LIMIT REACHED.")
+                print(
+                    f"{len(remaining)} video(s) have been saved for the next run."
+                )
+                print("This run will finish without losing the pending scripts.")
+                return
 
-    print("")
-    print("=" * 60)
-    print("ALL THREE SHORTS HAVE BEEN UPLOADED.")
+            print("Upload failed. Current and remaining videos were saved for retry.")
+            raise
+
+        except Exception:
+            # Preserve the current script and all remaining scripts on any
+            # generation or upload failure. Successfully published videos
+            # have already been removed from this queue below.
+            save_pending(videos[index - 1:])
+            raise
+
+        append_history(item, video_id, video_url)
+
+        # Remove the successfully published item immediately. If a later
+        # video fails, only the not-yet-published items remain queued.
+        save_pending(videos[index:])
+
+    print("\n" + "=" * 60)
+    print("ALL QUEUED SHORTS HAVE BEEN UPLOADED.")
     print("PUBLICATION HISTORY UPDATED.")
+    print("PENDING QUEUE EMPTY.")
     print("=" * 60)
 
 
