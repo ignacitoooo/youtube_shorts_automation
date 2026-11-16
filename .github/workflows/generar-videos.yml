@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: healthy-years-daily-shorts
+  group: healthy-years-repository-writes
   cancel-in-progress: false
 
 jobs:
@@ -117,6 +117,8 @@ jobs:
         env:
           BRANCH: ${{ github.ref_name }}
         run: |
+          set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
@@ -130,5 +132,12 @@ jobs:
           git commit -m "Update Shorts publication history and pending queue"
 
           git fetch origin "$BRANCH"
-          git rebase "origin/$BRANCH"
+
+          if ! git rebase "origin/$BRANCH"; then
+            echo "::warning::A remote history or queue conflict was detected."
+            echo "The local commit was not pushed to avoid overwriting remote data."
+            git rebase --abort || true
+            exit 0
+          fi
+
           git push origin "HEAD:$BRANCH"
