@@ -1,5 +1,5 @@
 
-name: The Healthy Years 404 - Gemini + Grok - Daily Shorts
+name: The Healthy Years 404 - Gemini - Safe Shorts Test
 
 on:
   workflow_dispatch:
@@ -89,7 +89,13 @@ jobs:
           print("Configuration completed")
           PY
 
-      - name: Research, generate and upload Shorts
+      - name: Validate Python and renderer CLI
+        run: |
+          python -m py_compile scripts/daily_shorts.py
+          python MoneyPrinterTurbo/cli.py --help > /dev/null
+          echo "Python syntax and MoneyPrinterTurbo CLI checks passed"
+
+      - name: Research, generate and render Shorts (no upload)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -100,6 +106,7 @@ jobs:
           PENDING_FILE: data/pendientes_publicacion.json
           VIDEO_WORKDIR: MoneyPrinterTurbo
           DRY_RUN: "true"
+          GROK_REVIEW_ENABLED: "false"
         run: python scripts/daily_shorts.py
 
       - name: Save generated videos as artifacts
