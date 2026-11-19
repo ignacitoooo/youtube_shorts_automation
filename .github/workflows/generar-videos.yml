@@ -1,5 +1,5 @@
 
-name: The Healthy Years 404 - Research, Generate and Publish 3 Shorts
+name: The Healthy Years 404 - Gemini + Grok - Daily Shorts
 
 on:
   workflow_dispatch:
@@ -91,7 +91,8 @@ jobs:
 
       - name: Research, generate and upload Shorts
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
