@@ -26,8 +26,6 @@ from googleapiclient.errors import HttpError
 
 MODEL = "openrouter/free"
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-
 FEEDS = [
     ("NIH News Releases", "https://www.nih.gov/news-releases/feed.xml"),
     ("NIH Research Matters", "https://www.nih.gov/nih-research-matters/feed.xml"),
