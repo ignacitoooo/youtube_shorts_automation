@@ -293,12 +293,20 @@ Return JSON only in the shape {{"videos":[...]}}.
     if not isinstance(draft, dict) or not isinstance(draft.get("videos"), list):
         raise RuntimeError("Gemini response must contain a videos list.")
 
-    print("Grok is reviewing medical accuracy, clarity and retention...")
-    review = grok_review(draft, feed_items)
+    if os.getenv("GROK_REVIEW_ENABLED", "false").strip().lower() in {"1", "true", "yes"}:
+        require_env("XAI_API_KEY")
+        print("Grok is reviewing medical accuracy, clarity and retention...")
+        review = grok_review(draft, feed_items)
+    else:
+        review = (
+            "Grok review skipped: GROK_REVIEW_ENABLED is false. "
+            "Do not treat this as an independent medical review."
+        )
+        print("Grok review is disabled to prevent unexpected API charges.")
 
-    print("Gemini is preparing the final scripts using Grok's review...")
+    print("Gemini is preparing the final scripts...")
     final_prompt = (
-        "Revise this draft using the reviewer feedback. Keep exactly three videos "
+        "Revise this draft using the reviewer feedback when available. Keep exactly three videos "
         "and the required fields topic,title,script,visual_terms,description,tags,source_urls. "
         "Use only exact source URLs present in the articles. Every script must be "
         "85-120 words. Do not introduce unsupported claims. Return JSON only.\n\n"
@@ -773,7 +781,6 @@ def main():
 
     require_env(
         "GEMINI_API_KEY",
-        "XAI_API_KEY",
         "PEXELS_API_KEY",
         "YT_CLIENT_ID",
         "YT_CLIENT_SECRET",
