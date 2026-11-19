@@ -452,6 +452,14 @@ def render_video(item, index):
         for path in task_folder.rglob("*.mp4")
     }
 
+    visual_terms = item["visual_terms"]
+    if isinstance(visual_terms, list):
+        visual_terms = ", ".join(str(term) for term in visual_terms if str(term).strip())
+    elif not isinstance(visual_terms, str):
+        raise RuntimeError(
+            f"visual_terms must be a string or list of strings, got {type(visual_terms).__name__}"
+        )
+
     command = [
         sys.executable,
         "cli.py",
@@ -460,7 +468,7 @@ def render_video(item, index):
         item["script"],
 
         "--video-terms",
-        item["visual_terms"],
+        visual_terms,
 
         "--video-language",
         "en-US",
