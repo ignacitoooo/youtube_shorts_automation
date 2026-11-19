@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -190,19 +191,31 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 GROK_MODEL = os.getenv("GROK_MODEL", "grok-4.7")
 
 
-def post_json(url, payload, headers, timeout=300):
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", **headers},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"AI provider HTTP {exc.code}: {detail[:1200]}") from exc
+def post_json(url, payload, headers, timeout=300, max_attempts=5):
+    request_data = json.dumps(payload).encode("utf-8")
+    retryable_statuses = {429, 500, 502, 503, 504}
+    for attempt in range(1, max_attempts + 1):
+        request = urllib.request.Request(
+            url,
+            data=request_data,
+            headers={"Content-Type": "application/json", **headers},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            if exc.code not in retryable_statuses or attempt == max_attempts:
+                raise RuntimeError(
+                    f"AI provider HTTP {exc.code} after {attempt} attempt(s): {detail[:1200]}"
+                ) from exc
+            wait_seconds = min(60, 5 * (2 ** (attempt - 1)))
+            print(
+                f"AI provider returned HTTP {exc.code}; "
+                f"retrying in {wait_seconds}s ({attempt}/{max_attempts - 1})..."
+            )
+            time.sleep(wait_seconds)
 
 
 def gemini_text(prompt):
