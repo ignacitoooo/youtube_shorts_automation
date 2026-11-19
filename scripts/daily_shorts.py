@@ -191,9 +191,12 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 GROK_MODEL = os.getenv("GROK_MODEL", "grok-4.7")
 
 
-def post_json(url, payload, headers, timeout=300, max_attempts=5):
+def post_json(url, payload, headers, timeout=300, max_attempts=6):
+    """POST JSON with bounded retries for temporary provider/network failures."""
     request_data = json.dumps(payload).encode("utf-8")
-    retryable_statuses = {429, 500, 502, 503, 504}
+    retryable_statuses = {408, 429, 500, 502, 503, 504}
+    last_error = None
+
     for attempt in range(1, max_attempts + 1):
         request = urllib.request.Request(
             url,
@@ -204,18 +207,36 @@ def post_json(url, payload, headers, timeout=300, max_attempts=5):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
+
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
+            last_error = exc
             if exc.code not in retryable_statuses or attempt == max_attempts:
                 raise RuntimeError(
                     f"AI provider HTTP {exc.code} after {attempt} attempt(s): {detail[:1200]}"
                 ) from exc
-            wait_seconds = min(60, 5 * (2 ** (attempt - 1)))
-            print(
-                f"AI provider returned HTTP {exc.code}; "
-                f"retrying in {wait_seconds}s ({attempt}/{max_attempts - 1})..."
-            )
-            time.sleep(wait_seconds)
+
+            retry_after = exc.headers.get("Retry-After")
+            try:
+                wait_seconds = float(retry_after) if retry_after else min(90, 10 * (2 ** (attempt - 1)))
+            except (TypeError, ValueError):
+                wait_seconds = min(90, 10 * (2 ** (attempt - 1)))
+
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt == max_attempts:
+                raise RuntimeError(
+                    f"AI provider network error after {attempt} attempts: {exc}"
+                ) from exc
+            wait_seconds = min(90, 10 * (2 ** (attempt - 1)))
+
+        print(
+            f"Temporary AI provider error; retrying in {wait_seconds:g}s "
+            f"({attempt}/{max_attempts - 1})..."
+        )
+        time.sleep(wait_seconds)
+
+    raise RuntimeError(f"AI provider request failed: {last_error}")
 
 
 def gemini_text(prompt):
