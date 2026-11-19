@@ -92,7 +92,8 @@ jobs:
       - name: Validate Python and renderer CLI
         run: |
           python -m py_compile scripts/daily_shorts.py
-          python MoneyPrinterTurbo/cli.py --help > /dev/null
+          python -m py_compile MoneyPrinterTurbo/cli.py
+          (cd MoneyPrinterTurbo && python cli.py --help > /dev/null)
           echo "Python syntax and MoneyPrinterTurbo CLI checks passed"
 
       - name: Research, generate and render Shorts (no upload)
