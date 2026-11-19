@@ -24,8 +24,6 @@ from googleapiclient.errors import HttpError
 # CONFIGURATION
 # ============================================================
 
-MODEL = "openrouter/free"
-
 FEEDS = [
     ("NIH News Releases", "https://www.nih.gov/news-releases/feed.xml"),
     ("NIH Research Matters", "https://www.nih.gov/nih-research-matters/feed.xml"),
@@ -217,7 +215,7 @@ def gemini_text(prompt):
         url,
         {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.25, "responseMimeType": "application/json"},
+            "generationConfig": {"responseMimeType": "application/json"},
         },
         {"x-goog-api-key": key},
         timeout=300,
