@@ -779,13 +779,12 @@ def main():
     print("DAILY RESEARCH - GEMINI + GROK - YOUTUBE SHORTS")
     print("=" * 60)
 
-    require_env(
-        "GEMINI_API_KEY",
-        "PEXELS_API_KEY",
-        "YT_CLIENT_ID",
-        "YT_CLIENT_SECRET",
-        "YT_REFRESH_TOKEN"
-    )
+    dry_run = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes"}
+    require_env("GEMINI_API_KEY", "PEXELS_API_KEY")
+    if not dry_run:
+        require_env("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN")
+
+    print("DRY RUN ENABLED: videos will be rendered but NOT uploaded." if dry_run else "LIVE MODE: videos may be published publicly.")
 
     history = load_history()
 
@@ -828,7 +827,7 @@ def main():
     # Save scripts before rendering and uploading.
     save_pending(videos)
 
-    youtube = make_youtube_client()
+    youtube = None if dry_run else make_youtube_client()
 
     for index, item in enumerate(videos, 1):
 
@@ -842,6 +841,10 @@ def main():
                 item,
                 index
             )
+
+            if dry_run:
+                print(f"DRY RUN: rendered locally, not uploaded: {video_path}")
+                continue
 
             video_id, video_url = upload_one(
                 youtube,
@@ -891,7 +894,7 @@ def main():
         save_pending(videos[index:])
 
     print("\n" + "=" * 60)
-    print("ALL QUEUED SHORTS HAVE BEEN UPLOADED.")
+    print("ALL QUEUED SHORTS HAVE BEEN RENDERED (DRY RUN; NOT UPLOADED)." if dry_run else "ALL QUEUED SHORTS HAVE BEEN UPLOADED.")
     print("PUBLICATION HISTORY UPDATED.")
     print("PENDING QUEUE EMPTY.")
     print("=" * 60)
