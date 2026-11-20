@@ -614,119 +614,120 @@ def repair_short_script(video, feed_items, valid_urls):
 
 
 def validate_videos(result, feed_items, history):
-
+    """Accept three unique, source-backed Shorts; ask Gemini for replacements when needed."""
     videos = result.get("videos", [])
-
     if not isinstance(videos, list):
-        raise RuntimeError(
-            "The AI response does not contain a valid videos list."
-        )
+        raise RuntimeError("The AI response does not contain a valid videos list.")
 
-    if len(videos) < 3:
-        raise RuntimeError(
-            "The AI found fewer than three new topics. "
-            "No videos will be uploaded today."
-        )
-
-    allowed_urls = {
-        item["url"]
-        for item in feed_items
-    }
-
-    old_topics = {
-        normalize(row.get("topic", ""))
-        for row in history
-    }
-
-    old_titles = {
-        normalize(row.get("title", ""))
-        for row in history
-    }
+    allowed_urls = {item["url"] for item in feed_items}
+    old_topics = {normalize(row.get("topic", "")) for row in history}
+    old_titles = {normalize(row.get("title", "")) for row in history}
 
     accepted = []
     seen_topics = set()
     seen_titles = set()
+    rejected_topics = set()
+    rejected_titles = set()
 
-    for video in videos:
+    def inspect_candidates(candidates):
+        for video in candidates:
+            if len(accepted) == 3:
+                break
+            if not isinstance(video, dict):
+                continue
+            required = ["topic", "title", "script", "visual_terms", "description", "source_urls"]
+            if not all(video.get(key) for key in required):
+                print("Rejected incomplete AI response.")
+                continue
 
-        required = [
-            "topic",
-            "title",
-            "script",
-            "visual_terms",
-            "description",
-            "source_urls"
-        ]
+            topic = normalize(video["topic"])
+            title = normalize(video["title"])
+            if not topic or not title:
+                continue
 
-        if not all(video.get(key) for key in required):
-            print("Rejected incomplete AI response.")
-            continue
+            if topic in old_topics or topic in seen_topics:
+                print(f"Repeated topic rejected: {topic}")
+                rejected_topics.add(topic)
+                continue
+            if title in old_titles or title in seen_titles:
+                print(f"Repeated title rejected: {title}")
+                rejected_titles.add(title)
+                continue
 
-        topic = normalize(video["topic"])
-        title = normalize(video["title"])
+            source_urls = video["source_urls"]
+            if not isinstance(source_urls, list):
+                print(f"Rejected invalid source list: {title}")
+                continue
+            valid_urls = [url for url in source_urls if url in allowed_urls]
+            if not valid_urls:
+                print(f"Rejected without a supplied source: {title}")
+                continue
 
-        if not topic or not title:
-            continue
-
-        if topic in old_topics:
-            print(f"Repeated topic rejected: {topic}")
-            continue
-
-        if title in old_titles:
-            print(f"Repeated title rejected: {title}")
-            continue
-
-        if topic in seen_topics or title in seen_titles:
-            continue
-
-        source_urls = video["source_urls"]
-
-        if not isinstance(source_urls, list):
-            continue
-
-        valid_urls = [
-            url for url in source_urls
-            if url in allowed_urls
-        ]
-
-        if not valid_urls:
-            print(
-                f"Rejected without a supplied source: {title}"
-            )
-            continue
-
-        word_count = len(video["script"].split())
-
-        if word_count < 85 or word_count > 120:
-            print(
-                f"Short script has {word_count} words; requesting a Gemini repair: {title}"
-            )
-            video = repair_short_script(
-                video,
-                feed_items,
-                valid_urls
-            )
             word_count = len(video["script"].split())
+            if word_count < 85 or word_count > 120:
+                print(f"Short script has {word_count} words; requesting a Gemini repair: {title}")
+                video = repair_short_script(video, feed_items, valid_urls)
+                word_count = len(video["script"].split())
 
-        if word_count < 85 or word_count > 120:
-            raise RuntimeError(
-                f"Short script remains outside 85-120 words after repair: {title}. "
-                "Nothing will be uploaded."
-            )
+            if word_count < 85 or word_count > 120:
+                raise RuntimeError(
+                    f"Short script remains outside 85-120 words after repair: {title}. Nothing will be uploaded."
+                )
 
-        video["source_urls"] = valid_urls
-        accepted.append(video)
+            video["source_urls"] = valid_urls
+            accepted.append(video)
+            seen_topics.add(topic)
+            seen_titles.add(title)
+            print(f"Accepted unique Short: {title} ({word_count} words)")
 
-        seen_topics.add(topic)
-        seen_titles.add(title)
+    inspect_candidates(videos)
 
-        if len(accepted) == 3:
+    # Gemini sometimes ignores the exclusion list. Generate fresh replacements
+    # instead of weakening duplicate-topic/title or source-verification rules.
+    for attempt in range(1, 3):
+        missing = 3 - len(accepted)
+        if missing <= 0:
             break
+
+        excluded = {
+            "previous_topics": sorted(old_topics | seen_topics | rejected_topics),
+            "previous_titles": sorted(old_titles | seen_titles | rejected_titles),
+        }
+        prompt = (
+            "Create exactly " + str(missing) + " replacement YouTube Shorts in natural American English "
+            "for adults 50+. These are replacements for rejected duplicate ideas. "
+            "Every replacement must use a genuinely NEW topic and a NEW title not present in the exclusion lists. "
+            "Each spoken script must be 85-120 words, ideally 90-105. "
+            "Use only facts in the supplied articles and exact supplied source URLs. "
+            "Do not invent statistics, diagnoses, cures, causal claims or medication advice. "
+            "Include a strong opening, practical value, 8-12 ordered Pexels visual search phrases, "
+            "description, tags and source_urls. Include the educational medical disclaimer in each description. "
+            "Return JSON only in the shape {\"videos\":[...]}.\n\n"
+            "EXCLUSIONS:\n" + json.dumps(excluded, ensure_ascii=False)
+            + "\n\nSUPPLIED SOURCE ARTICLES:\n"
+            + json.dumps(feed_items, ensure_ascii=False)
+        )
+        print(f"Requesting {missing} unique replacement Short(s) from Gemini ({attempt}/2)...")
+        generated_text = gemini_text(prompt)
+        try:
+            generated = parse_gemini_json(generated_text, f"replacement Shorts {attempt}")
+        except RuntimeError:
+            generated = repair_content_json(generated_text, feed_items, f"replacement Shorts {attempt}")
+
+        replacement_videos = generated.get("videos", [])
+        if not isinstance(replacement_videos, list) or not replacement_videos:
+            print("Gemini returned no usable replacement Shorts.")
+            continue
+
+        before_count = len(accepted)
+        inspect_candidates(replacement_videos)
+        if len(accepted) == before_count:
+            print("No new valid Shorts accepted in this replacement attempt.")
 
     if len(accepted) != 3:
         raise RuntimeError(
-            f"Only {len(accepted)} valid new videos passed "
-            "the checks. Nothing will be uploaded."
+            f"Only {len(accepted)} valid unique Shorts passed validation after two replacement attempts. "
+            "Duplicate and source protections remain enabled. Nothing will be uploaded."
         )
 
     return accepted
