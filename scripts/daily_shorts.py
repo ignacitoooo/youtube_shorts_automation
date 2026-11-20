@@ -444,20 +444,89 @@ Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
 # CHECK NEW TOPICS
 # ============================================================
 
+def repair_long_video_script(item, feed_items, valid_urls):
+    """Expand a long-form script while preserving its already-verified source URLs."""
+    articles_by_url = {
+        article["url"]: article
+        for article in feed_items
+        if article.get("url") in valid_urls
+    }
+    if not articles_by_url or not valid_urls:
+        raise RuntimeError(
+            f"Cannot repair long video without verified supplied sources: {item.get('title', 'untitled')}"
+        )
+
+    original_script = item["script"]
+    for attempt in range(1, 3):
+        prompt = (
+            "Rewrite and expand ONLY the spoken narration script for this evidence-based "
+            "YouTube long-form health video. Return JSON only as an object with exactly "
+            "one string field named script. The finished script must contain 620-700 "
+            "words by whitespace-separated word count, and must remain within the hard "
+            "limit of 600-750 words when counted normally. Preserve the topic, narrative "
+            "flow, and useful details. Use only facts supported by the supplied verified "
+            "source articles. Do not invent statistics, diagnoses, cures, causal claims, "
+            "or medication advice. Do not add, remove, or change sources.\n\n"
+            "TITLE: " + item["title"] + "\n"
+            "TOPIC: " + item["topic"] + "\n"
+            "VERIFIED SOURCE ARTICLES:\n"
+            + json.dumps(list(articles_by_url.values()), ensure_ascii=False)
+            + "\n\nCURRENT SCRIPT:\n" + original_script
+        )
+        print(
+            f"Repairing long video script ({attempt}/2): {item['title']}"
+        )
+        repaired = parse_gemini_json(
+            gemini_text(prompt),
+            f"Long video script repair {attempt}"
+        )
+        candidate = repaired.get("script")
+        if not isinstance(candidate, str) or not candidate.strip():
+            print("Gemini long video repair returned no usable script.")
+            continue
+
+        word_count = len(re.findall(r"\\b[\\w'-]+\\b", candidate))
+        if 600 <= word_count <= 750:
+            item["script"] = candidate.strip()
+            item["source_urls"] = list(valid_urls)
+            print(
+                f"Long video script repaired: {word_count} words; "
+                "verified sources preserved."
+            )
+            return item
+
+        print(
+            f"Repaired long video script still has {word_count} words; "
+            "it will be retried."
+        )
+
+    raise RuntimeError(
+        f"Gemini could not produce a 600-750 word long video after two repairs: "
+        f"{item.get('title', 'untitled')}. Nothing will be uploaded."
+    )
+
+
 def validate_long_video(result, feed_items, history, shorts):
     item = result.get("long_video")
     required = ["topic", "title", "script", "visual_terms", "description", "source_urls", "tags"]
     if not isinstance(item, dict) or not all(item.get(key) for key in required):
         raise RuntimeError("Gemini did not provide a complete long_video object.")
 
-    words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
-    if not 600 <= words <= 750:
-        raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
-
     allowed_urls = {article["url"] for article in feed_items}
     sources = item["source_urls"]
     if not isinstance(sources, list) or not sources or not set(sources).issubset(allowed_urls):
         raise RuntimeError("Long video contains missing or unverified source URLs.")
+
+    words = len(re.findall(r"\\b[\\w'-]+\\b", item["script"]))
+    if not 600 <= words <= 750:
+        print(
+            f"Long video script has {words} words; requesting Gemini expansion."
+        )
+        item = repair_long_video_script(item, feed_items, sources)
+        words = len(re.findall(r"\\b[\\w'-]+\\b", item["script"]))
+
+    if not 600 <= words <= 750:
+        raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
 
     topic = normalize(item["topic"])
     short_topics = {normalize(short.get("topic", "")) for short in shorts}
