@@ -485,7 +485,7 @@ def repair_long_video_script(item, feed_items, valid_urls):
             print("Gemini long video repair returned no usable script.")
             continue
 
-        word_count = len(re.findall(r"\\b[\\w'-]+\\b", candidate))
+        word_count = len(re.findall(r"\b[\w'-]+\b", candidate))
         if 600 <= word_count <= 750:
             item["script"] = candidate.strip()
             item["source_urls"] = list(valid_urls)
@@ -517,13 +517,13 @@ def validate_long_video(result, feed_items, history, shorts):
     if not isinstance(sources, list) or not sources or not set(sources).issubset(allowed_urls):
         raise RuntimeError("Long video contains missing or unverified source URLs.")
 
-    words = len(re.findall(r"\\b[\\w'-]+\\b", item["script"]))
+    words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
     if not 600 <= words <= 750:
         print(
             f"Long video script has {words} words; requesting Gemini expansion."
         )
         item = repair_long_video_script(item, feed_items, sources)
-        words = len(re.findall(r"\\b[\\w'-]+\\b", item["script"]))
+        words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
 
     if not 600 <= words <= 750:
         raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
