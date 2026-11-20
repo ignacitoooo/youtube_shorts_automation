@@ -377,7 +377,7 @@ def validate_long_video(result, feed_items, history, shorts):
     if not isinstance(item, dict) or not all(item.get(key) for key in required):
         raise RuntimeError("Gemini did not provide a complete long_video object.")
 
-    words = len(re.findall(r"\\b[\\w'-]+\\b", item["script"]))
+    words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
     if not 600 <= words <= 750:
         raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
 
