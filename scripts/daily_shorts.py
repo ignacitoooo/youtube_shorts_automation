@@ -240,28 +240,60 @@ def post_json(url, payload, headers, timeout=300, max_attempts=6):
 
 
 def gemini_text(prompt):
+    """Use the configured Gemini model, then an official Flash-Lite fallback on capacity errors."""
     key = os.environ["GEMINI_API_KEY"]
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        + GEMINI_MODEL + ":generateContent"
-    )
-    data = post_json(
-        url,
-        {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json"},
-        },
-        {"x-goog-api-key": key},
-        timeout=300,
-    )
-    candidates = data.get("candidates", [])
-    if not candidates:
-        raise RuntimeError("Gemini returned no candidate.")
-    return "".join(
-        part.get("text", "")
-        for part in candidates[0].get("content", {}).get("parts", [])
-        if isinstance(part, dict)
-    ).strip()
+    fallback_models = [
+        model.strip()
+        for model in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",")
+        if model.strip() and model.strip() != GEMINI_MODEL
+    ]
+    models = [GEMINI_MODEL] + fallback_models
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
+    last_error = None
+
+    for index, model in enumerate(models):
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            + model + ":generateContent"
+        )
+        try:
+            print(f"Requesting Gemini model: {model}")
+            data = post_json(
+                url,
+                payload,
+                {"x-goog-api-key": key},
+                timeout=300,
+                max_attempts=3,
+            )
+            candidates = data.get("candidates", [])
+            if not candidates:
+                raise RuntimeError(f"Gemini model {model} returned no candidate.")
+            text = "".join(
+                part.get("text", "")
+                for part in candidates[0].get("content", {}).get("parts", [])
+                if isinstance(part, dict)
+            ).strip()
+            if not text:
+                raise RuntimeError(f"Gemini model {model} returned empty text.")
+            print(f"Gemini response received from {model}.")
+            return text
+        except RuntimeError as exc:
+            last_error = exc
+            retryable_capacity_error = any(
+                marker in str(exc) for marker in ("HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")
+            )
+            if not retryable_capacity_error or index == len(models) - 1:
+                raise
+            print(
+                f"Gemini model {model} is unavailable; switching to "
+                f"{models[index + 1]} without using a paid provider."
+            )
+            time.sleep(10)
+
+    raise RuntimeError(f"All configured Gemini models failed: {last_error}")
 
 
 def grok_review(draft, articles):
