@@ -475,6 +475,66 @@ def validate_long_video(result, feed_items, history, shorts):
     return item
 
 
+def repair_short_script(video, feed_items, valid_urls):
+    """Regenerate an out-of-range Short script without changing its verified sources."""
+    articles_by_url = {
+        article["url"]: article
+        for article in feed_items
+        if article.get("url") in valid_urls
+    }
+    if not articles_by_url:
+        raise RuntimeError(
+            f"Cannot repair Short without a verified supplied source: {video.get('title', 'untitled')}"
+        )
+
+    original_script = video["script"]
+    for attempt in range(1, 3):
+        prompt = (
+            "Rewrite ONLY the spoken script for this evidence-based YouTube Short. "
+            "Return JSON only with exactly one field: {\\"script\\": \\"...\\"}. "
+            "The script must contain 90-105 whitespace-separated words (never fewer than 85 "
+            "or more than 120), sound natural when narrated, and retain a strong hook. "
+            "Use only facts supported by the supplied source article(s); do not invent "
+            "statistics, diagnoses, cures, causal claims, or medication advice. "
+            "Do not add or change sources.\n\n"
+            "TITLE: " + video["title"] + "\n"
+            "TOPIC: " + video["topic"] + "\n"
+            "VERIFIED SOURCE ARTICLES:\n"
+            + json.dumps(list(articles_by_url.values()), ensure_ascii=False)
+            + "\n\nCURRENT SCRIPT:\n" + original_script
+        )
+        print(
+            f"Repairing Short script ({attempt}/2): {video['title']}"
+        )
+        repaired = parse_gemini_json(
+            gemini_text(prompt),
+            f"Short script repair {attempt}"
+        )
+        candidate = repaired.get("script")
+        if not isinstance(candidate, str) or not candidate.strip():
+            print("Gemini script repair returned no usable script.")
+            continue
+
+        word_count = len(candidate.split())
+        if 85 <= word_count <= 120:
+            video["script"] = candidate.strip()
+            video["source_urls"] = list(valid_urls)
+            print(
+                f"Short script repaired and validated: {word_count} words."
+            )
+            return video
+
+        print(
+            f"Repaired script still has {word_count} words; "
+            "it will be retried."
+        )
+
+    raise RuntimeError(
+        f"Gemini could not produce an 85-120 word Short after two repairs: "
+        f"{video.get('title', 'untitled')}. Nothing will be uploaded."
+    )
+
+
 def validate_videos(result, feed_items, history):
 
     videos = result.get("videos", [])
@@ -561,9 +621,20 @@ def validate_videos(result, feed_items, history):
 
         if word_count < 85 or word_count > 120:
             print(
-                f"Rejected script with {word_count} words: {title}"
+                f"Short script has {word_count} words; requesting a Gemini repair: {title}"
             )
-            continue
+            video = repair_short_script(
+                video,
+                feed_items,
+                valid_urls
+            )
+            word_count = len(video["script"].split())
+
+        if word_count < 85 or word_count > 120:
+            raise RuntimeError(
+                f"Short script remains outside 85-120 words after repair: {title}. "
+                "Nothing will be uploaded."
+            )
 
         video["source_urls"] = valid_urls
         accepted.append(video)
