@@ -491,7 +491,7 @@ def repair_short_script(video, feed_items, valid_urls):
     for attempt in range(1, 3):
         prompt = (
             "Rewrite ONLY the spoken script for this evidence-based YouTube Short. "
-            "Return JSON only with exactly one field: {\\"script\\": \\"...\\"}. "
+            "Return JSON only as an object with exactly one string field named script. "
             "The script must contain 90-105 whitespace-separated words (never fewer than 85 "
             "or more than 120), sound natural when narrated, and retain a strong hook. "
             "Use only facts supported by the supplied source article(s); do not invent "
