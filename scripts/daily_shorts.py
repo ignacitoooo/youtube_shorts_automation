@@ -335,8 +335,8 @@ def parse_gemini_json(text, stage):
     """Parse strict JSON while tolerating Markdown fences and surrounding prose."""
     cleaned = (text or "").strip()
     if cleaned.startswith("```"):
-        cleaned = re.sub(r"^\`\`\`(?:json)?\\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\\s*\`\`\`$", "", cleaned)
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
     try:
         value = json.loads(cleaned)
     except json.JSONDecodeError:
