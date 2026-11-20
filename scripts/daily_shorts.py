@@ -316,7 +316,15 @@ articles and exact source URLs. Include this disclaimer in every description:
 Each object must contain topic,title,script,visual_terms,description,tags,source_urls.
 Avoid these prior topics/titles: {json.dumps(previous, ensure_ascii=False)}
 Research articles: {json.dumps(feed_items, ensure_ascii=False)}
-Return JSON only in the shape {{"videos":[...]}}.
+Also create exactly ONE horizontal long-form video:
+- 600-750 spoken words, approximately five minutes.
+- A distinct topic not used by any Short.
+- A clear opening, 3-5 developed sections, practical takeaways and concise conclusion.
+- Evidence-based health education for adults 50+; no diagnosis, cure claims, invented statistics or medication changes.
+- Use only supplied articles and exact source URLs.
+- Include 12-18 ordered Pexels visual search phrases, description and tags.
+- Required long_video fields: topic,title,script,visual_terms,description,tags,source_urls.
+Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
 """
     print("Gemini is drafting three health Shorts...")
     draft_text = gemini_text(prompt)
@@ -340,10 +348,11 @@ Return JSON only in the shape {{"videos":[...]}}.
 
     print("Gemini is preparing the final scripts...")
     final_prompt = (
-        "Revise this draft using the reviewer feedback when available. Keep exactly three videos "
-        "and the required fields topic,title,script,visual_terms,description,tags,source_urls. "
-        "Use only exact source URLs present in the articles. Every script must be "
-        "85-120 words. Do not introduce unsupported claims. Return JSON only.\n\n"
+        "Revise this draft using the reviewer feedback when available. Keep exactly three Shorts "
+        "and exactly one long_video. Shorts must be 85-120 words. The long_video must be "
+        "600-750 words for approximately five minutes of narration, with fields "
+        "topic,title,script,visual_terms,description,tags,source_urls. Use only exact source URLs "
+        "present in supplied articles. Do not introduce unsupported claims. Return JSON only.\n\n"
         "ARTICLES:\n" + json.dumps(feed_items, ensure_ascii=False)
         + "\n\nDRAFT:\n" + json.dumps(draft, ensure_ascii=False)
         + "\n\nGROK REVIEW:\n" + review
@@ -361,6 +370,37 @@ Return JSON only in the shape {{"videos":[...]}}.
 # ============================================================
 # CHECK NEW TOPICS
 # ============================================================
+
+def validate_long_video(result, feed_items, history, shorts):
+    item = result.get("long_video")
+    required = ["topic", "title", "script", "visual_terms", "description", "source_urls", "tags"]
+    if not isinstance(item, dict) or not all(item.get(key) for key in required):
+        raise RuntimeError("Gemini did not provide a complete long_video object.")
+
+    words = len(re.findall(r"\\b[\\w'-]+\\b", item["script"]))
+    if not 600 <= words <= 750:
+        raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
+
+    allowed_urls = {article["url"] for article in feed_items}
+    sources = item["source_urls"]
+    if not isinstance(sources, list) or not sources or not set(sources).issubset(allowed_urls):
+        raise RuntimeError("Long video contains missing or unverified source URLs.")
+
+    topic = normalize(item["topic"])
+    short_topics = {normalize(short.get("topic", "")) for short in shorts}
+    old_topics = {normalize(row.get("topic", "")) for row in history}
+    if topic in short_topics or topic in old_topics:
+        raise RuntimeError("Long video topic duplicates a Short or a previous publication.")
+
+    terms = item["visual_terms"]
+    if isinstance(terms, str):
+        terms = [term.strip() for term in terms.split(",") if term.strip()]
+    if not isinstance(terms, list) or len(terms) < 8:
+        raise RuntimeError("Long video must include at least 8 visual search phrases.")
+    item["visual_terms"] = terms
+    print(f"Validated long video: {item['title']} ({words} words)")
+    return item
+
 
 def validate_videos(result, feed_items, history):
 
@@ -474,7 +514,7 @@ def validate_videos(result, feed_items, history):
 # GENERATE VIDEO WITH MONEYPRINTERTURBO
 # ============================================================
 
-def render_video(item, index):
+def render_video(item, index, aspect="9:16", label="Short"):
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -511,7 +551,7 @@ def render_video(item, index):
         "pexels",
 
         "--video-aspect",
-        "9:16",
+        aspect,
 
         "--video-fit-mode",
         "cover",
@@ -564,7 +604,7 @@ def render_video(item, index):
     ]
 
     print(
-        f"Generating video {index}/3: {item['title']}"
+        f"Generating {label} {index}: {item['title']}"
     )
 
     subprocess.run(
@@ -837,6 +877,7 @@ def main():
     # Retry pending videos before researching new topics.
     pending = load_pending()
 
+    long_video = None
     if pending:
         videos = pending
 
@@ -858,6 +899,7 @@ def main():
             feed_items,
             history
         )
+        long_video = validate_long_video(result, feed_items, history, videos)
 
         print("\nTODAY'S SELECTED TOPICS:")
 
@@ -936,7 +978,16 @@ def main():
         save_pending(videos[index:])
 
     print("\n" + "=" * 60)
-    print("ALL QUEUED SHORTS HAVE BEEN RENDERED (DRY RUN; NOT UPLOADED)." if dry_run else "ALL QUEUED SHORTS HAVE BEEN UPLOADED.")
+    print("ALL SHORTS AND LONG VIDEO RENDERED (DRY RUN; NOT UPLOADED)." if dry_run and long_video is not None else ("ALL QUEUED SHORTS HAVE BEEN RENDERED (DRY RUN; NOT UPLOADED)." if dry_run else "ALL QUEUED VIDEOS HAVE BEEN UPLOADED."))
+    if long_video is not None:
+        print("\\nPROCESSING HORIZONTAL LONG-FORM VIDEO")
+        long_path = render_video(long_video, 4, aspect="16:9", label="Long video")
+        if dry_run:
+            print(f"DRY RUN: long video rendered locally, not uploaded: {long_path}")
+        else:
+            long_id, long_url = upload_one(youtube, long_video, long_path)
+            append_history(long_video, long_id, long_url)
+
     print("PUBLICATION HISTORY UPDATED.")
     print("PENDING QUEUE EMPTY.")
     print("=" * 60)
