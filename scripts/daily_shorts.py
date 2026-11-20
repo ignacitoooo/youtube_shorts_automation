@@ -331,6 +331,51 @@ def grok_review(draft, articles):
     return result
 
 
+def parse_gemini_json(text, stage):
+    """Parse strict JSON while tolerating Markdown fences and surrounding prose."""
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^\`\`\`(?:json)?\\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\\s*\`\`\`$", "", cleaned)
+    try:
+        value = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError(f"Gemini {stage} response did not contain a JSON object.")
+        try:
+            value = json.loads(cleaned[start:end + 1])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Gemini {stage} response was not valid JSON.") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Gemini {stage} response must be a JSON object.")
+    return value
+
+
+def ensure_content_shape(value, stage):
+    if not isinstance(value.get("videos"), list) or len(value["videos"]) != 3:
+        raise RuntimeError(f"Gemini {stage} response must contain exactly three videos.")
+    if not isinstance(value.get("long_video"), dict):
+        raise RuntimeError(f"Gemini {stage} response must contain a long_video object.")
+    return value
+
+
+def repair_content_json(raw_text, articles, stage):
+    repair_prompt = (
+        "Convert the response below into valid JSON only. Preserve its factual content and "
+        "source URLs; do not add facts. Required exact shape: "
+        '{"videos":[THREE objects with topic,title,script,visual_terms,description,tags,source_urls],'
+        '"long_video":{"topic","title","script","visual_terms","description","tags","source_urls"}}. '
+        "The long_video script must be 600-750 words. Return no Markdown fences or commentary.\n\n"
+        "Allowed source articles and URLs:\n" + json.dumps(articles, ensure_ascii=False)
+        + "\n\nMalformed response:\n" + (raw_text or "")[:24000]
+    )
+    print(f"Requesting one JSON-format repair for Gemini {stage} response...")
+    repaired = parse_gemini_json(gemini_text(repair_prompt), stage + " repaired")
+    return ensure_content_shape(repaired, stage + " repaired")
+
+
 def call_openrouter(feed_items, history):
     """Compatibility name: Gemini drafts, Grok critiques, Gemini revises."""
     previous = [
@@ -361,11 +406,9 @@ Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
     print("Gemini is drafting three health Shorts...")
     draft_text = gemini_text(prompt)
     try:
-        draft = json.loads(draft_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Gemini did not return valid JSON.") from exc
-    if not isinstance(draft, dict) or not isinstance(draft.get("videos"), list):
-        raise RuntimeError("Gemini response must contain a videos list.")
+        draft = ensure_content_shape(parse_gemini_json(draft_text, "draft"), "draft")
+    except RuntimeError:
+        draft = repair_content_json(draft_text, feed_items, "draft")
 
     if os.getenv("GROK_REVIEW_ENABLED", "false").strip().lower() in {"1", "true", "yes"}:
         require_env("XAI_API_KEY")
@@ -391,11 +434,9 @@ Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
     )
     final_text = gemini_text(final_prompt)
     try:
-        result = json.loads(final_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Gemini's final revision was not valid JSON.") from exc
-    if not isinstance(result, dict) or not isinstance(result.get("videos"), list):
-        raise RuntimeError("Gemini final response must contain a videos list.")
+        result = ensure_content_shape(parse_gemini_json(final_text, "final"), "final")
+    except RuntimeError:
+        result = repair_content_json(final_text, feed_items, "final")
     return result
 
 
