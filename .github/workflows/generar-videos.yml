@@ -1,5 +1,5 @@
 
-name: The Healthy Years 404 - Research, Generate and Publish 3 Shorts
+name: The Healthy Years 404 - Gemini - Daily YouTube Publishing
 
 on:
   workflow_dispatch:
@@ -89,9 +89,16 @@ jobs:
           print("Configuration completed")
           PY
 
-      - name: Research, generate and upload Shorts
+      - name: Validate Python and renderer CLI
+        run: |
+          python -m py_compile scripts/daily_shorts.py
+          python -m py_compile MoneyPrinterTurbo/cli.py
+          (cd MoneyPrinterTurbo && python cli.py --help > /dev/null)
+          echo "Python syntax and MoneyPrinterTurbo CLI checks passed"
+
+      - name: Research, generate, render and publish 3 Shorts + 1 horizontal video
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
@@ -99,13 +106,15 @@ jobs:
           HISTORY_FILE: data/historial_videos.csv
           PENDING_FILE: data/pendientes_publicacion.json
           VIDEO_WORKDIR: MoneyPrinterTurbo
+          DRY_RUN: "false"
+          GROK_REVIEW_ENABLED: "false"
         run: python scripts/daily_shorts.py
 
       - name: Save generated videos as artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: healthy-years-404-shorts
+          name: healthy-years-404-published-videos
           path: |
             MoneyPrinterTurbo/upload_queue/*.mp4
             MoneyPrinterTurbo/storage/tasks/**/*.mp4

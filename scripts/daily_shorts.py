@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -23,10 +24,6 @@ from googleapiclient.errors import HttpError
 # ============================================================
 # CONFIGURATION
 # ============================================================
-
-MODEL = "openrouter/free"
-
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 FEEDS = [
     ("NIH News Releases", "https://www.nih.gov/news-releases/feed.xml"),
@@ -187,287 +184,296 @@ def get_research():
 
 
 # ============================================================
-# OPENROUTER - IMPROVED SHORTS SCRIPTWRITER
+# GEMINI + GROK COLLABORATION
 # ============================================================
 
-def call_openrouter(feed_items, history):
-    """Generate three research-based Shorts with stronger retention."""
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+GROK_MODEL = os.getenv("GROK_MODEL", "grok-4.7")
 
-    previous = [
-        {
-            "topic": row.get("topic", ""),
-            "title": row.get("title", ""),
-        }
-        for row in history[-500:]
-    ]
 
-    prompt = f"""
-You are the health researcher and YouTube Shorts scriptwriter
-for The Healthy Years 404.
-
-CHANNEL AND AUDIENCE:
-- Channel: The Healthy Years 404.
-- Audience: adults aged 50 and older, primarily in the United States.
-- Write everything in natural, conversational American English.
-
-GOAL:
-Create exactly THREE distinct, useful, scientifically responsible
-YouTube Shorts. Each video should make viewers want to keep watching
-without using misleading clickbait or exaggerating medical findings.
-
-TOPIC PRIORITIES:
-Healthy aging after 50, protein and nutrition, joint and bone health,
-heart health, sleep, brain health and memory, gut health, lung health,
-blood pressure, mobility, balance and practical daily habits.
-
-Choose topics with a recognizable problem, a useful takeaway and
-research support in the supplied articles. Use different health
-subjects and angles across the three videos.
-
-RETENTION STRUCTURE FOR EACH SCRIPT:
-
-1. FIRST 0-3 SECONDS:
-Start with a direct hook: a relatable problem, surprising but accurate
-finding, common mistake or useful question.
-Do not greet viewers or introduce the channel.
-
-2. BY SECOND 8:
-Deliver the first useful tip or key fact. No long setup.
-
-3. MIDDLE:
-Give concise, practical explanations. Use short sentences
-that sound natural when spoken aloud.
-
-4. OPEN LOOP:
-Early in the script, create honest curiosity about the final tip.
-For example, say that the last habit is often overlooked.
-The final tip must genuinely add value.
-
-5. END:
-Put the strongest or most overlooked takeaway near the end,
-then finish with a very short call to action.
-No long goodbye.
-
-SCRIPT LENGTH:
-- Aim for 95-110 spoken words per script.
-- Acceptable range: 85-120 words.
-- Target video duration: approximately 35-45 seconds.
-- Prefer three useful takeaways when research supports them.
-- Avoid repeated points, filler and long introductions.
-- Write narration, not an article.
-
-VISUAL PACING:
-Provide 8-12 specific English Pexels search phrases.
-Put them in the order they should appear in the video.
-Make them relevant to the narration and suitable for visual
-changes approximately every 3-5 seconds.
-
-Prefer realistic footage of adults 50+, daily activities,
-food, walking, exercise, sleep routines and relevant health visuals.
-Do not use generic or unrelated visual phrases.
-
-TITLES:
-Create a clear, curiosity-driven English title, ideally 45-65 characters.
-Use the benefit, problem or age group when appropriate.
-The title must accurately represent the supplied research.
-
-MEDICAL SAFETY AND ACCURACY:
-- Use only factual claims supported by the supplied articles.
-- Never invent studies, statistics, medical facts or source URLs.
-- Distinguish association from causation.
-- Do not present animal research as proven human benefit.
-- Do not claim that a food, supplement or habit cures disease.
-- Never advise viewers to stop or change prescribed medication.
-- Explain uncertainty when evidence is preliminary.
-- Offer responsible general education, not personal diagnosis.
-
-Include this exact disclaimer in every description:
-"This video is for educational purposes only and is not a substitute
-for professional medical advice."
-
-AVOID REPETITION:
-Do not repeat previously published topics, titles or substantially
-similar research angles. A new title does not make an old topic new.
-
-Previously published videos:
-{json.dumps(previous, ensure_ascii=False)}
-
-AVAILABLE RESEARCH ARTICLES:
-Use the supplied articles as the factual basis.
-Every video must cite at least one exact URL from this list.
-Do not invent or alter URLs.
-
-{json.dumps(feed_items, ensure_ascii=False)}
-
-OUTPUT:
-Return one complete valid JSON object only.
-No Markdown and no commentary.
-
-Return exactly this structure with exactly three video objects:
-
-{{
-  "videos": [
-    {{
-      "topic": "Specific health topic",
-      "title": "English YouTube Shorts title",
-      "script": "Complete spoken English script of 85-120 words",
-      "visual_terms": "8-12 English Pexels search phrases separated by commas",
-      "description": "English description including the exact medical disclaimer and relevant hashtags",
-      "tags": ["healthy aging", "health after 50", "wellness"],
-      "source_urls": ["Exact article URL from the supplied articles"]
-    }}
-  ]
-}}
-
-Ensure every JSON string is properly escaped and the JSON is complete.
-"""
-
-    api_key = os.environ["OPENROUTER_API_KEY"]
-
-    conversation = [
-        {
-            "role": "system",
-            "content": (
-                "You are a careful health researcher and expert YouTube Shorts "
-                "scriptwriter. Write natural American English, prioritize a "
-                "strong first-three-second hook, early practical value, visual "
-                "pacing and scientific accuracy. Return valid JSON only."
-            ),
-        },
-        {"role": "user", "content": prompt},
-    ]
-
+def post_json(url, payload, headers, timeout=300, max_attempts=6):
+    """POST JSON with bounded retries for temporary provider/network failures."""
+    request_data = json.dumps(payload).encode("utf-8")
+    retryable_statuses = {408, 429, 500, 502, 503, 504}
     last_error = None
 
-    for attempt in range(1, 4):
-        payload = {
-            "model": MODEL,
-            "messages": conversation,
-            "temperature": 0.2,
-            "max_tokens": 16000,
-        }
-
+    for attempt in range(1, max_attempts + 1):
         request = urllib.request.Request(
-            OPENROUTER_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": "Bearer " + api_key,
-                "HTTP-Referer": "https://github.com",
-                "X-Title": "The Healthy Years 404",
-            },
+            url,
+            data=request_data,
+            headers={"Content-Type": "application/json", **headers},
             method="POST",
         )
-
-        print(f"OpenRouter request, attempt {attempt}/3...")
-
         try:
-            with urllib.request.urlopen(request, timeout=240) as response:
-                data = json.loads(response.read().decode("utf-8"))
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
 
         except urllib.error.HTTPError as exc:
-            details = exc.read().decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"OpenRouter API error {exc.code}: {details[:2000]}"
-            ) from exc
+            detail = exc.read().decode("utf-8", errors="replace")
+            last_error = exc
+            if exc.code not in retryable_statuses or attempt == max_attempts:
+                raise RuntimeError(
+                    f"AI provider HTTP {exc.code} after {attempt} attempt(s): {detail[:1200]}"
+                ) from exc
+
+            retry_after = exc.headers.get("Retry-After")
+            try:
+                wait_seconds = float(retry_after) if retry_after else min(90, 10 * (2 ** (attempt - 1)))
+            except (TypeError, ValueError):
+                wait_seconds = min(90, 10 * (2 ** (attempt - 1)))
 
         except (urllib.error.URLError, TimeoutError) as exc:
-            last_error = f"Network error: {exc}"
-            print(last_error)
-            if attempt < 3:
-                continue
-            break
+            last_error = exc
+            if attempt == max_attempts:
+                raise RuntimeError(
+                    f"AI provider network error after {attempt} attempts: {exc}"
+                ) from exc
+            wait_seconds = min(90, 10 * (2 ** (attempt - 1)))
 
-        choices = data.get("choices", [])
-
-        if not choices:
-            last_error = (
-                "OpenRouter returned no choices: "
-                + json.dumps(data)[:1500]
-            )
-            continue
-
-        content = choices[0].get("message", {}).get("content", "")
-
-        if isinstance(content, list):
-            content = "".join(
-                part.get("text", "")
-                for part in content
-                if isinstance(part, dict)
-            )
-
-        text = str(content).strip()
-
-        text = re.sub(
-            r"^```(?:json)?\s*",
-            "",
-            text,
-            flags=re.IGNORECASE
+        print(
+            f"Temporary AI provider error; retrying in {wait_seconds:g}s "
+            f"({attempt}/{max_attempts - 1})..."
         )
+        time.sleep(wait_seconds)
 
-        text = re.sub(r"\s*```$", "", text)
+    raise RuntimeError(f"AI provider request failed: {last_error}")
 
-        first = text.find("{")
-        last = text.rfind("}")
 
+def gemini_text(prompt):
+    """Use the configured Gemini model, then an official Flash-Lite fallback on capacity errors."""
+    key = os.environ["GEMINI_API_KEY"]
+    fallback_models = [
+        model.strip()
+        for model in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",")
+        if model.strip() and model.strip() != GEMINI_MODEL
+    ]
+    models = [GEMINI_MODEL] + fallback_models
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"},
+    }
+    last_error = None
+
+    for index, model in enumerate(models):
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            + model + ":generateContent"
+        )
         try:
-            if first < 0 or last <= first:
-                raise ValueError("No complete JSON object found")
-
-            result = json.loads(text[first:last + 1])
-
-            if (
-                not isinstance(result, dict)
-                or not isinstance(result.get("videos"), list)
-            ):
-                raise ValueError("JSON must contain a videos list")
-
-            if len(result["videos"]) < 3:
-                raise ValueError("Fewer than three videos were returned")
-
-            print(
-                f"OpenRouter returned {len(result['videos'])} video scripts."
+            print(f"Requesting Gemini model: {model}")
+            data = post_json(
+                url,
+                payload,
+                {"x-goog-api-key": key},
+                timeout=300,
+                max_attempts=3,
             )
-
-            return result
-
-        except (json.JSONDecodeError, ValueError) as exc:
-            last_error = str(exc)
-
-            print(
-                f"Invalid OpenRouter response on attempt "
-                f"{attempt}: {last_error}"
+            candidates = data.get("candidates", [])
+            if not candidates:
+                raise RuntimeError(f"Gemini model {model} returned no candidate.")
+            text = "".join(
+                part.get("text", "")
+                for part in candidates[0].get("content", {}).get("parts", [])
+                if isinstance(part, dict)
+            ).strip()
+            if not text:
+                raise RuntimeError(f"Gemini model {model} returned empty text.")
+            print(f"Gemini response received from {model}.")
+            return text
+        except RuntimeError as exc:
+            last_error = exc
+            retryable_capacity_error = any(
+                marker in str(exc) for marker in ("HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")
             )
+            if not retryable_capacity_error or index == len(models) - 1:
+                raise
+            print(
+                f"Gemini model {model} is unavailable; switching to "
+                f"{models[index + 1]} without using a paid provider."
+            )
+            time.sleep(10)
 
-            if attempt < 3:
-                conversation = [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Repair the supplied response and return "
-                            "one complete valid JSON object only."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            "Fix this response so it is complete valid JSON "
-                            "with exactly three video objects. Preserve factual "
-                            "content and the required schema. Do not add "
-                            "commentary.\n\n" + text[:14000]
-                        ),
-                    },
-                ]
+    raise RuntimeError(f"All configured Gemini models failed: {last_error}")
 
-    raise RuntimeError(
-        "OpenRouter did not provide valid JSON after 3 attempts. "
-        f"Last error: {last_error}. No videos were uploaded."
+
+def grok_review(draft, articles):
+    key = os.environ["XAI_API_KEY"]
+    prompt = (
+        "Act as a rigorous health-content editor. Review the draft below against "
+        "the supplied source articles. Flag unsupported medical claims, causal "
+        "overstatements, unsafe advice, repetition, weak hooks and unclear wording. "
+        "Do not invent facts or sources. Return concise actionable feedback only.\n\n"
+        "ARTICLES:\n" + json.dumps(articles, ensure_ascii=False)[:18000]
+        + "\n\nDRAFT:\n" + json.dumps(draft, ensure_ascii=False)
     )
+    data = post_json(
+        "https://api.x.ai/v1/responses",
+        {
+            "model": GROK_MODEL,
+            "input": [
+                {"role": "system", "content": "You are a cautious medical-content reviewer. Never invent evidence."},
+                {"role": "user", "content": prompt},
+            ],
+            "store": False,
+            "max_output_tokens": 5000,
+        },
+        {"Authorization": "Bearer " + key},
+        timeout=600,
+    )
+    texts = []
+    for item in data.get("output", []):
+        for part in item.get("content", []):
+            if part.get("type") == "output_text":
+                texts.append(part.get("text", ""))
+    result = "\n".join(texts).strip()
+    if not result:
+        raise RuntimeError("Grok returned an empty review.")
+    return result
+
+
+def parse_gemini_json(text, stage):
+    """Parse strict JSON while tolerating Markdown fences and surrounding prose."""
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        value = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError(f"Gemini {stage} response did not contain a JSON object.")
+        try:
+            value = json.loads(cleaned[start:end + 1])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Gemini {stage} response was not valid JSON.") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Gemini {stage} response must be a JSON object.")
+    return value
+
+
+def ensure_content_shape(value, stage):
+    if not isinstance(value.get("videos"), list) or len(value["videos"]) != 3:
+        raise RuntimeError(f"Gemini {stage} response must contain exactly three videos.")
+    if not isinstance(value.get("long_video"), dict):
+        raise RuntimeError(f"Gemini {stage} response must contain a long_video object.")
+    return value
+
+
+def repair_content_json(raw_text, articles, stage):
+    repair_prompt = (
+        "Convert the response below into valid JSON only. Preserve its factual content and "
+        "source URLs; do not add facts. Required exact shape: "
+        '{"videos":[THREE objects with topic,title,script,visual_terms,description,tags,source_urls],'
+        '"long_video":{"topic","title","script","visual_terms","description","tags","source_urls"}}. '
+        "The long_video script must be 600-750 words. Return no Markdown fences or commentary.\n\n"
+        "Allowed source articles and URLs:\n" + json.dumps(articles, ensure_ascii=False)
+        + "\n\nMalformed response:\n" + (raw_text or "")[:24000]
+    )
+    print(f"Requesting one JSON-format repair for Gemini {stage} response...")
+    repaired = parse_gemini_json(gemini_text(repair_prompt), stage + " repaired")
+    return ensure_content_shape(repaired, stage + " repaired")
+
+
+def call_openrouter(feed_items, history):
+    """Compatibility name: Gemini drafts, Grok critiques, Gemini revises."""
+    previous = [
+        {"topic": row.get("topic", ""), "title": row.get("title", "")}
+        for row in history[-500:]
+    ]
+    prompt = f"""
+You write evidence-based YouTube Shorts for adults 50+, in natural American English.
+Create exactly THREE distinct scripts, each 85-120 spoken words, with a strong
+first-3-second hook, practical value early, accurate claims, and 8-12 ordered
+Pexels search phrases. Avoid medical diagnosis, cures, invented statistics,
+unsupported causal claims, and advice to change medication. Use only supplied
+articles and exact source URLs. Include this disclaimer in every description:
+"This video is for educational purposes only and is not a substitute for professional medical advice."
+Each object must contain topic,title,script,visual_terms,description,tags,source_urls.
+Avoid these prior topics/titles: {json.dumps(previous, ensure_ascii=False)}
+Research articles: {json.dumps(feed_items, ensure_ascii=False)}
+Also create exactly ONE horizontal long-form video:
+- 600-750 spoken words, approximately five minutes.
+- A distinct topic not used by any Short.
+- A clear opening, 3-5 developed sections, practical takeaways and concise conclusion.
+- Evidence-based health education for adults 50+; no diagnosis, cure claims, invented statistics or medication changes.
+- Use only supplied articles and exact source URLs.
+- Include 12-18 ordered Pexels visual search phrases, description and tags.
+- Required long_video fields: topic,title,script,visual_terms,description,tags,source_urls.
+Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
+"""
+    print("Gemini is drafting three health Shorts...")
+    draft_text = gemini_text(prompt)
+    try:
+        draft = ensure_content_shape(parse_gemini_json(draft_text, "draft"), "draft")
+    except RuntimeError:
+        draft = repair_content_json(draft_text, feed_items, "draft")
+
+    if os.getenv("GROK_REVIEW_ENABLED", "false").strip().lower() in {"1", "true", "yes"}:
+        require_env("XAI_API_KEY")
+        print("Grok is reviewing medical accuracy, clarity and retention...")
+        review = grok_review(draft, feed_items)
+    else:
+        review = (
+            "Grok review skipped: GROK_REVIEW_ENABLED is false. "
+            "Do not treat this as an independent medical review."
+        )
+        print("Grok review is disabled to prevent unexpected API charges.")
+
+    print("Gemini is preparing the final scripts...")
+    final_prompt = (
+        "Revise this draft using the reviewer feedback when available. Keep exactly three Shorts "
+        "and exactly one long_video. Shorts must be 85-120 words. The long_video must be "
+        "600-750 words for approximately five minutes of narration, with fields "
+        "topic,title,script,visual_terms,description,tags,source_urls. Use only exact source URLs "
+        "present in supplied articles. Do not introduce unsupported claims. Return JSON only.\n\n"
+        "ARTICLES:\n" + json.dumps(feed_items, ensure_ascii=False)
+        + "\n\nDRAFT:\n" + json.dumps(draft, ensure_ascii=False)
+        + "\n\nGROK REVIEW:\n" + review
+    )
+    final_text = gemini_text(final_prompt)
+    try:
+        result = ensure_content_shape(parse_gemini_json(final_text, "final"), "final")
+    except RuntimeError:
+        result = repair_content_json(final_text, feed_items, "final")
+    return result
 
 
 # ============================================================
 # CHECK NEW TOPICS
 # ============================================================
+
+def validate_long_video(result, feed_items, history, shorts):
+    item = result.get("long_video")
+    required = ["topic", "title", "script", "visual_terms", "description", "source_urls", "tags"]
+    if not isinstance(item, dict) or not all(item.get(key) for key in required):
+        raise RuntimeError("Gemini did not provide a complete long_video object.")
+
+    words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
+    if not 600 <= words <= 750:
+        raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
+
+    allowed_urls = {article["url"] for article in feed_items}
+    sources = item["source_urls"]
+    if not isinstance(sources, list) or not sources or not set(sources).issubset(allowed_urls):
+        raise RuntimeError("Long video contains missing or unverified source URLs.")
+
+    topic = normalize(item["topic"])
+    short_topics = {normalize(short.get("topic", "")) for short in shorts}
+    old_topics = {normalize(row.get("topic", "")) for row in history}
+    if topic in short_topics or topic in old_topics:
+        raise RuntimeError("Long video topic duplicates a Short or a previous publication.")
+
+    terms = item["visual_terms"]
+    if isinstance(terms, str):
+        terms = [term.strip() for term in terms.split(",") if term.strip()]
+    if not isinstance(terms, list) or len(terms) < 8:
+        raise RuntimeError("Long video must include at least 8 visual search phrases.")
+    item["visual_terms"] = terms
+    print(f"Validated long video: {item['title']} ({words} words)")
+    return item
+
 
 def validate_videos(result, feed_items, history):
 
@@ -581,7 +587,7 @@ def validate_videos(result, feed_items, history):
 # GENERATE VIDEO WITH MONEYPRINTERTURBO
 # ============================================================
 
-def render_video(item, index):
+def render_video(item, index, aspect="9:16", label="Short"):
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -593,6 +599,14 @@ def render_video(item, index):
         for path in task_folder.rglob("*.mp4")
     }
 
+    visual_terms = item["visual_terms"]
+    if isinstance(visual_terms, list):
+        visual_terms = ", ".join(str(term) for term in visual_terms if str(term).strip())
+    elif not isinstance(visual_terms, str):
+        raise RuntimeError(
+            f"visual_terms must be a string or list of strings, got {type(visual_terms).__name__}"
+        )
+
     command = [
         sys.executable,
         "cli.py",
@@ -601,7 +615,7 @@ def render_video(item, index):
         item["script"],
 
         "--video-terms",
-        item["visual_terms"],
+        visual_terms,
 
         "--video-language",
         "en-US",
@@ -610,7 +624,7 @@ def render_video(item, index):
         "pexels",
 
         "--video-aspect",
-        "9:16",
+        aspect,
 
         "--video-fit-mode",
         "cover",
@@ -663,7 +677,7 @@ def render_video(item, index):
     ]
 
     print(
-        f"Generating video {index}/3: {item['title']}"
+        f"Generating {label} {index}: {item['title']}"
     )
 
     subprocess.run(
@@ -917,16 +931,15 @@ def main():
 
     print("=" * 60)
     print("THE HEALTHY YEARS 404")
-    print("DAILY RESEARCH AND YOUTUBE SHORTS AUTOMATION")
+    print("DAILY RESEARCH - GEMINI + GROK - YOUTUBE SHORTS")
     print("=" * 60)
 
-    require_env(
-        "OPENROUTER_API_KEY",
-        "PEXELS_API_KEY",
-        "YT_CLIENT_ID",
-        "YT_CLIENT_SECRET",
-        "YT_REFRESH_TOKEN"
-    )
+    dry_run = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes"}
+    require_env("GEMINI_API_KEY", "PEXELS_API_KEY")
+    if not dry_run:
+        require_env("YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN")
+
+    print("DRY RUN ENABLED: videos will be rendered but NOT uploaded." if dry_run else "LIVE MODE: videos may be published publicly.")
 
     history = load_history()
 
@@ -937,12 +950,21 @@ def main():
     # Retry pending videos before researching new topics.
     pending = load_pending()
 
+    long_video = None
     if pending:
         videos = pending
 
         print(
-            f"Found {len(videos)} pending video(s). "
-            "They will be retried before researching new topics."
+            f"Found {len(videos)} pending Short(s). "
+            "They will be retried, while a fresh long-form video is generated."
+        )
+
+        # A pending Shorts queue must never suppress the daily horizontal video.
+        feed_items = get_research()
+        fresh_result = call_openrouter(feed_items, history)
+        fresh_shorts = validate_videos(fresh_result, feed_items, history)
+        long_video = validate_long_video(
+            fresh_result, feed_items, history, fresh_shorts
         )
 
     else:
@@ -958,6 +980,7 @@ def main():
             feed_items,
             history
         )
+        long_video = validate_long_video(result, feed_items, history, videos)
 
         print("\nTODAY'S SELECTED TOPICS:")
 
@@ -969,7 +992,7 @@ def main():
     # Save scripts before rendering and uploading.
     save_pending(videos)
 
-    youtube = make_youtube_client()
+    youtube = None if dry_run else make_youtube_client()
 
     for index, item in enumerate(videos, 1):
 
@@ -983,6 +1006,10 @@ def main():
                 item,
                 index
             )
+
+            if dry_run:
+                print(f"DRY RUN: rendered locally, not uploaded: {video_path}")
+                continue
 
             video_id, video_url = upload_one(
                 youtube,
@@ -1032,7 +1059,20 @@ def main():
         save_pending(videos[index:])
 
     print("\n" + "=" * 60)
-    print("ALL QUEUED SHORTS HAVE BEEN UPLOADED.")
+    print("ALL SHORTS AND LONG VIDEO RENDERED (DRY RUN; NOT UPLOADED)." if dry_run and long_video is not None else ("ALL QUEUED SHORTS HAVE BEEN RENDERED (DRY RUN; NOT UPLOADED)." if dry_run else "ALL QUEUED VIDEOS HAVE BEEN UPLOADED."))
+    if long_video is None:
+        raise RuntimeError("No long-form video was generated; refusing to report a complete run.")
+
+    print("\\nPROCESSING HORIZONTAL LONG-FORM VIDEO")
+    long_path = render_video(long_video, 4, aspect="16:9", label="Long video")
+    if not os.path.isfile(long_path) or os.path.getsize(long_path) == 0:
+        raise RuntimeError(f"Long-form render did not produce a valid MP4: {long_path}")
+    if dry_run:
+        print(f"DRY RUN: long video rendered locally, not uploaded: {long_path}")
+    else:
+        long_id, long_url = upload_one(youtube, long_video, long_path)
+        append_history(long_video, long_id, long_url)
+
     print("PUBLICATION HISTORY UPDATED.")
     print("PENDING QUEUE EMPTY.")
     print("=" * 60)
