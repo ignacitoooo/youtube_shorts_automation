@@ -1180,8 +1180,9 @@ def main():
 
     save_pending(videos)
     youtube = None if dry_run else make_youtube_client()
+    queued_videos = list(videos)
 
-    for index, item in enumerate(videos, 1):
+    for index, item in enumerate(queued_videos, 1):
         video_format = item.get("_video_format", "short")
         is_long = video_format == "long"
         aspect = "16:9" if is_long else "9:16"
@@ -1207,11 +1208,10 @@ def main():
 
             # Remove each successful upload immediately; preserve all remaining
             # videos, including a horizontal video, if a later upload fails.
-            videos = videos[index:]
-            save_pending(videos)
+            save_pending(queued_videos[index:])
 
         except HttpError as exc:
-            remaining = videos[index - 1:]
+            remaining = queued_videos[index - 1:]
             save_pending(remaining)
 
             if is_upload_limit_error(exc):
@@ -1223,7 +1223,7 @@ def main():
             raise
 
         except Exception:
-            save_pending(videos[index - 1:])
+            save_pending(queued_videos[index - 1:])
             raise
 
     if dry_run:
