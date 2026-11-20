@@ -882,8 +882,16 @@ def main():
         videos = pending
 
         print(
-            f"Found {len(videos)} pending video(s). "
-            "They will be retried before researching new topics."
+            f"Found {len(videos)} pending Short(s). "
+            "They will be retried, while a fresh long-form video is generated."
+        )
+
+        # A pending Shorts queue must never suppress the daily horizontal video.
+        feed_items = get_research()
+        fresh_result = call_openrouter(feed_items, history)
+        fresh_shorts = validate_videos(fresh_result, feed_items, history)
+        long_video = validate_long_video(
+            fresh_result, feed_items, history, fresh_shorts
         )
 
     else:
@@ -979,14 +987,18 @@ def main():
 
     print("\n" + "=" * 60)
     print("ALL SHORTS AND LONG VIDEO RENDERED (DRY RUN; NOT UPLOADED)." if dry_run and long_video is not None else ("ALL QUEUED SHORTS HAVE BEEN RENDERED (DRY RUN; NOT UPLOADED)." if dry_run else "ALL QUEUED VIDEOS HAVE BEEN UPLOADED."))
-    if long_video is not None:
-        print("\\nPROCESSING HORIZONTAL LONG-FORM VIDEO")
-        long_path = render_video(long_video, 4, aspect="16:9", label="Long video")
-        if dry_run:
-            print(f"DRY RUN: long video rendered locally, not uploaded: {long_path}")
-        else:
-            long_id, long_url = upload_one(youtube, long_video, long_path)
-            append_history(long_video, long_id, long_url)
+    if long_video is None:
+        raise RuntimeError("No long-form video was generated; refusing to report a complete run.")
+
+    print("\\nPROCESSING HORIZONTAL LONG-FORM VIDEO")
+    long_path = render_video(long_video, 4, aspect="16:9", label="Long video")
+    if not os.path.isfile(long_path) or os.path.getsize(long_path) == 0:
+        raise RuntimeError(f"Long-form render did not produce a valid MP4: {long_path}")
+    if dry_run:
+        print(f"DRY RUN: long video rendered locally, not uploaded: {long_path}")
+    else:
+        long_id, long_url = upload_one(youtube, long_video, long_path)
+        append_history(long_video, long_id, long_url)
 
     print("PUBLICATION HISTORY UPDATED.")
     print("PENDING QUEUE EMPTY.")
