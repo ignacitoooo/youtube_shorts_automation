@@ -445,7 +445,7 @@ Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
 # ============================================================
 
 def repair_long_video_script(item, feed_items, valid_urls):
-    """Expand a long-form script while preserving its already-verified source URLs."""
+    """Append a source-grounded continuation; never rely on a full-script rewrite."""
     articles_by_url = {
         article["url"]: article
         for article in feed_items
@@ -456,55 +456,64 @@ def repair_long_video_script(item, feed_items, valid_urls):
             f"Cannot repair long video without verified supplied sources: {item.get('title', 'untitled')}"
         )
 
-    original_script = item["script"]
+    script = item["script"].strip()
     for attempt in range(1, 3):
+        current_words = len(re.findall(r"\b[\w'-]+\b", script))
+        if 600 <= current_words <= 750:
+            item["script"] = script
+            item["source_urls"] = list(valid_urls)
+            print(f"Long video script repaired: {current_words} words; verified sources preserved.")
+            return item
+        if current_words > 750:
+            raise RuntimeError(
+                f"Long video script has {current_words} words after repair; expected 600-750. Nothing will be uploaded."
+            )
+
+        target_addition = min(230, max(120, 650 - current_words))
         prompt = (
-            "Rewrite and expand ONLY the spoken narration script for this evidence-based "
-            "YouTube long-form health video. Return JSON only as an object with exactly "
-            "one string field named script. The finished script must contain 620-700 "
-            "words by whitespace-separated word count, and must remain within the hard "
-            "limit of 600-750 words when counted normally. Preserve the topic, narrative "
-            "flow, and useful details. Use only facts supported by the supplied verified "
-            "source articles. Do not invent statistics, diagnoses, cures, causal claims, "
-            "or medication advice. Do not add, remove, or change sources.\n\n"
+            "Continue the narration below. Do NOT rewrite or summarize the existing script. "
+            "Return JSON only with exactly one string field named continuation. "
+            f"Write approximately {target_addition} new words, as 2-3 coherent paragraphs, "
+            "that can be appended directly to the end of the existing narration. "
+            "The completed combined script must be 620-700 words, and must never exceed 750. "
+            "Add useful explanation, context, practical implications and a natural conclusion. "
+            "Use ONLY facts explicitly supported by the verified source articles below. "
+            "Do not invent statistics, diagnoses, cures, causal claims or medication advice. "
+            "Do not repeat existing points or add, remove or change sources. "
+            "If the sources do not support more detail, explain relevant limitations rather than inventing facts.\n\n"
             "TITLE: " + item["title"] + "\n"
             "TOPIC: " + item["topic"] + "\n"
             "VERIFIED SOURCE ARTICLES:\n"
             + json.dumps(list(articles_by_url.values()), ensure_ascii=False)
-            + "\n\nCURRENT SCRIPT:\n" + original_script
+            + "\n\nEXISTING SCRIPT (continue from its ending):\n" + script
         )
         print(
-            f"Repairing long video script ({attempt}/2): {item['title']}"
+            f"Requesting evidence-based long-video continuation ({attempt}/2); "
+            f"current length: {current_words} words."
         )
         repaired = parse_gemini_json(
             gemini_text(prompt),
-            f"Long video script repair {attempt}"
+            f"Long video continuation {attempt}"
         )
-        candidate = repaired.get("script")
-        if not isinstance(candidate, str) or not candidate.strip():
-            print("Gemini long video repair returned no usable script.")
+        continuation = repaired.get("continuation")
+        if not isinstance(continuation, str) or not continuation.strip():
+            print("Gemini returned no usable continuation.")
             continue
 
-        word_count = len(re.findall(r"\b[\w'-]+\b", candidate))
-        if 600 <= word_count <= 750:
-            item["script"] = candidate.strip()
+        script = script + "\n\n" + continuation.strip()
+        new_count = len(re.findall(r"\b[\w'-]+\b", script))
+        print(f"Combined long-video script now has {new_count} words.")
+        if 600 <= new_count <= 750:
+            item["script"] = script
             item["source_urls"] = list(valid_urls)
-            print(
-                f"Long video script repaired: {word_count} words; "
-                "verified sources preserved."
-            )
+            print("Long video continuation accepted; verified sources preserved.")
             return item
 
-        print(
-            f"Repaired long video script still has {word_count} words; "
-            "it will be retried."
-        )
-
+    final_count = len(re.findall(r"\b[\w'-]+\b", script))
     raise RuntimeError(
-        f"Gemini could not produce a 600-750 word long video after two repairs: "
-        f"{item.get('title', 'untitled')}. Nothing will be uploaded."
+        f"Gemini could not produce a 600-750 word long video after two continuation attempts; "
+        f"final count: {final_count}. Nothing will be uploaded."
     )
-
 
 def validate_long_video(result, feed_items, history, shorts):
     item = result.get("long_video")
