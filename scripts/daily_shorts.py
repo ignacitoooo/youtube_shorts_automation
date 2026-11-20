@@ -727,6 +727,59 @@ def validate_videos(result, feed_items, history):
 # GENERATE VIDEO WITH MONEYPRINTERTURBO
 # ============================================================
 
+def validate_mp4(path, expected_aspect):
+    """Use ffprobe to reject corrupt, empty, or incorrectly oriented renders."""
+    if not path.is_file() or path.stat().st_size < 1024:
+        raise RuntimeError(f"Rendered MP4 is missing or unexpectedly small: {path}")
+
+    probe = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-show_entries", "stream=codec_type,width,height",
+            "-of", "json", str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    metadata = json.loads(probe.stdout)
+    video_streams = [
+        stream for stream in metadata.get("streams", [])
+        if stream.get("codec_type") == "video"
+    ]
+    if not video_streams:
+        raise RuntimeError(f"Rendered MP4 has no video stream: {path}")
+
+    width = int(video_streams[0].get("width", 0))
+    height = int(video_streams[0].get("height", 0))
+    duration = float(metadata.get("format", {}).get("duration", 0))
+    if width <= 0 or height <= 0 or duration <= 0:
+        raise RuntimeError(f"Rendered MP4 has invalid dimensions or duration: {path}")
+
+    ratio = width / height
+    if expected_aspect == "9:16":
+        if ratio >= 1:
+            raise RuntimeError(f"Expected vertical 9:16 video, got {width}x{height}.")
+        if duration > 180:
+            raise RuntimeError(f"Short exceeds YouTube Shorts 3-minute limit: {duration:.1f}s.")
+    elif expected_aspect == "16:9":
+        if ratio <= 1.2:
+            raise RuntimeError(f"Expected horizontal 16:9 video, got {width}x{height}.")
+        if not 180 <= duration <= 480:
+            raise RuntimeError(
+                f"Horizontal video duration {duration:.1f}s is outside the 3-8 minute safety window."
+            )
+    else:
+        raise RuntimeError(f"Unsupported expected aspect ratio: {expected_aspect}")
+
+    print(
+        f"MP4 validated: {path.name}, {width}x{height}, "
+        f"{duration:.1f}s, aspect {expected_aspect}"
+    )
+    return True
+
+
 def render_video(item, index, aspect="9:16", label="Short"):
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -856,6 +909,7 @@ def render_video(item, index, aspect="9:16", label="Short"):
     )
 
     destination.write_bytes(latest.read_bytes())
+    validate_mp4(destination, aspect)
 
     print(f"Video file ready: {destination}")
 
@@ -1071,7 +1125,7 @@ def main():
 
     print("=" * 60)
     print("THE HEALTHY YEARS 404")
-    print("DAILY RESEARCH - GEMINI + GROK - YOUTUBE SHORTS")
+    print("DAILY RESEARCH - GEMINI - YOUTUBE SHORTS + LONG VIDEO")
     print("=" * 60)
 
     dry_run = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes"}
@@ -1082,139 +1136,102 @@ def main():
     print("DRY RUN ENABLED: videos will be rendered but NOT uploaded." if dry_run else "LIVE MODE: videos may be published publicly.")
 
     history = load_history()
+    print(f"Loaded {len(history)} previous publications.")
 
-    print(
-        f"Loaded {len(history)} previous publications."
-    )
-
-    # Retry pending videos before researching new topics.
+    # One durable queue for every format. Legacy queue entries without a
+    # format marker are treated as Shorts for backwards compatibility.
     pending = load_pending()
+    videos = list(pending)
 
-    long_video = None
-    if pending:
-        videos = pending
-
-        print(
-            f"Found {len(videos)} pending Short(s). "
-            "They will be retried, while a fresh long-form video is generated."
+    if videos:
+        print(f"Found {len(videos)} pending video(s); retrying them first.")
+        has_pending_long = any(
+            item.get("_video_format", "short") == "long"
+            for item in videos
         )
-
-        # A pending Shorts queue must never suppress the daily horizontal video.
-        feed_items = get_research()
-        fresh_result = call_openrouter(feed_items, history)
-        fresh_shorts = validate_videos(fresh_result, feed_items, history)
-        long_video = validate_long_video(
-            fresh_result, feed_items, history, fresh_shorts
-        )
-
+        if not has_pending_long:
+            print("Pending queue has no horizontal video; generating one to add to the same queue.")
+            feed_items = get_research()
+            fresh_result = call_openrouter(feed_items, history)
+            fresh_shorts = validate_videos(fresh_result, feed_items, history)
+            long_video = validate_long_video(
+                fresh_result, feed_items, history, fresh_shorts
+            )
+            long_video["_video_format"] = "long"
+            videos.append(long_video)
     else:
         feed_items = get_research()
+        result = call_openrouter(feed_items, history)
+        shorts = validate_videos(result, feed_items, history)
+        long_video = validate_long_video(result, feed_items, history, shorts)
 
-        result = call_openrouter(
-            feed_items,
-            history
-        )
+        videos = []
+        for item in shorts:
+            queued = dict(item)
+            queued["_video_format"] = "short"
+            videos.append(queued)
 
-        videos = validate_videos(
-            result,
-            feed_items,
-            history
-        )
-        long_video = validate_long_video(result, feed_items, history, videos)
+        queued_long = dict(long_video)
+        queued_long["_video_format"] = "long"
+        videos.append(queued_long)
 
-        print("\nTODAY'S SELECTED TOPICS:")
+    if len(videos) == 0:
+        raise RuntimeError("No videos available to process.")
 
-        for index, item in enumerate(videos, 1):
-            print(
-                f"{index}. {item['topic']} - {item['title']}"
-            )
-
-    # Save scripts before rendering and uploading.
     save_pending(videos)
-
     youtube = None if dry_run else make_youtube_client()
 
     for index, item in enumerate(videos, 1):
+        video_format = item.get("_video_format", "short")
+        is_long = video_format == "long"
+        aspect = "16:9" if is_long else "9:16"
+        label = "Long video" if is_long else "Short"
 
         print("")
-        print(
-            f"PROCESSING VIDEO {index}/{len(videos)}"
-        )
+        print(f"PROCESSING VIDEO {index}/{len(videos)} ({label})")
 
         try:
             video_path = render_video(
                 item,
-                index
+                index,
+                aspect=aspect,
+                label=label,
             )
 
             if dry_run:
-                print(f"DRY RUN: rendered locally, not uploaded: {video_path}")
+                print(f"DRY RUN: rendered and validated, not uploaded: {video_path}")
                 continue
 
-            video_id, video_url = upload_one(
-                youtube,
-                item,
-                video_path
-            )
+            video_id, video_url = upload_one(youtube, item, video_path)
+            append_history(item, video_id, video_url)
+
+            # Remove each successful upload immediately; preserve all remaining
+            # videos, including a horizontal video, if a later upload fails.
+            videos = videos[index:]
+            save_pending(videos)
 
         except HttpError as exc:
-
             remaining = videos[index - 1:]
             save_pending(remaining)
 
             if is_upload_limit_error(exc):
-
-                print("\nYOUTUBE DAILY UPLOAD LIMIT REACHED.")
-
-                print(
-                    f"{len(remaining)} video(s) "
-                    "have been saved for the next run."
-                )
-
-                print(
-                    "The remaining videos will be retried later."
-                )
-
+                print("\\nYOUTUBE DAILY UPLOAD LIMIT REACHED.")
+                print(f"{len(remaining)} video(s) saved for the next run.")
                 return
 
-            print(
-                "Upload failed. Current and remaining "
-                "videos were saved for retry."
-            )
-
+            print("YouTube upload failed; current and remaining videos were queued.")
             raise
 
         except Exception:
-
             save_pending(videos[index - 1:])
             raise
 
-        append_history(
-            item,
-            video_id,
-            video_url
-        )
-
-        # Remove successfully uploaded video from pending queue.
-        save_pending(videos[index:])
-
-    print("\n" + "=" * 60)
-    print("ALL SHORTS AND LONG VIDEO RENDERED (DRY RUN; NOT UPLOADED)." if dry_run and long_video is not None else ("ALL QUEUED SHORTS HAVE BEEN RENDERED (DRY RUN; NOT UPLOADED)." if dry_run else "ALL QUEUED VIDEOS HAVE BEEN UPLOADED."))
-    if long_video is None:
-        raise RuntimeError("No long-form video was generated; refusing to report a complete run.")
-
-    print("\\nPROCESSING HORIZONTAL LONG-FORM VIDEO")
-    long_path = render_video(long_video, 4, aspect="16:9", label="Long video")
-    if not os.path.isfile(long_path) or os.path.getsize(long_path) == 0:
-        raise RuntimeError(f"Long-form render did not produce a valid MP4: {long_path}")
     if dry_run:
-        print(f"DRY RUN: long video rendered locally, not uploaded: {long_path}")
+        print("\\nDRY RUN COMPLETE: all queued videos were rendered and validated; none were uploaded.")
+        print("The complete queue has been preserved for a later live run.")
     else:
-        long_id, long_url = upload_one(youtube, long_video, long_path)
-        append_history(long_video, long_id, long_url)
-
-    print("PUBLICATION HISTORY UPDATED.")
-    print("PENDING QUEUE EMPTY.")
+        save_pending([])
+        print("\\nALL QUEUED VIDEOS WERE UPLOADED AND RECORDED.")
     print("=" * 60)
 
 
