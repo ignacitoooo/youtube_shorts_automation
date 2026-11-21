@@ -128,7 +128,21 @@ def load_history():
             writer.writeheader()
 
     with HISTORY.open(newline="", encoding="utf-8") as file:
-        return list(csv.DictReader(file))
+        reader = csv.DictReader(file)
+        existing_fields = reader.fieldnames or []
+        rows = list(reader)
+
+    # Safely extend older history files before writing the new analytics columns.
+    if existing_fields != HISTORY_FIELDS:
+        temporary = HISTORY.with_suffix(HISTORY.suffix + ".tmp")
+        with temporary.open("w", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=HISTORY_FIELDS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({field: row.get(field, "") for field in HISTORY_FIELDS})
+        temporary.replace(HISTORY)
+
+    return rows
 
 
 # ============================================================
