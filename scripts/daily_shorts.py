@@ -664,7 +664,8 @@ def repair_short_script(video, feed_items, valid_urls):
             "or more than 120), sound natural when narrated, and retain a strong hook. "
             "Use only facts supported by the supplied source article(s); do not invent "
             "statistics, diagnoses, cures, causal claims, or medication advice. "
-            "Do not add or change sources.\n\n"
+            "Do not add or change sources. End with one of these exact short subscribe CTAs: "
+            + json.dumps(SUBSCRIBE_CTAS) + ". Keep the complete script within 85-120 words.\n\n"
             "TITLE: " + video["title"] + "\n"
             "TOPIC: " + video["topic"] + "\n"
             "VERIFIED SOURCE ARTICLES:\n"
@@ -889,7 +890,7 @@ def validate_mp4(path, expected_aspect):
         f"MP4 validated: {path.name}, {width}x{height}, "
         f"{duration:.1f}s, aspect {expected_aspect}"
     )
-    return True
+    return duration
 
 
 def render_video(item, index, aspect="9:16", label="Short"):
@@ -1021,7 +1022,9 @@ def render_video(item, index, aspect="9:16", label="Short"):
     )
 
     destination.write_bytes(latest.read_bytes())
-    validate_mp4(destination, aspect)
+    duration_seconds = validate_mp4(destination, aspect)
+    item["duration_seconds"] = round(duration_seconds, 2)
+    item["opening_hook"] = opening_hook(item.get("script", ""))
 
     print(f"Video file ready: {destination}")
 
