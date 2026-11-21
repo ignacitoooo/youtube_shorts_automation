@@ -40,10 +40,7 @@ VIDEO_DIR = Path(os.getenv("VIDEO_WORKDIR", "MoneyPrinterTurbo"))
 UPLOAD_DIR = VIDEO_DIR / "upload_queue"
 
 MAX_VIDEOS_PER_DAY = max(1, min(3, int(os.getenv("MAX_VIDEOS_PER_DAY", "3"))))
-SHORT_HISTORY_FIELDS = [
-    "date_utc", "topic", "title", "video_id", "video_url", "source_urls",
-    "duration_seconds", "topic_score", "hook_prompt",
-]
+MIN_TOPIC_SCORE = max(1, min(10, int(os.getenv("MIN_TOPIC_SCORE", "6"))))
 SUBSCRIBE_CTAS = [
     "Follow The Healthy Years for one practical healthy-aging habit after 50.",
     "Subscribe for clear, science-based ways to support your health after 50.",
@@ -69,7 +66,8 @@ def score_topic(topic, title, script):
     return max(1, min(10, score))
 
 
-def hook_prompt_used(script):
+def opening_hook(script):
+    """Return the actual first spoken sentence for analytics."""
     first_sentence = re.split(r"(?<=[.!?])\\s+", (script or "").strip(), maxsplit=1)[0]
     return first_sentence[:300]
 
@@ -78,7 +76,7 @@ def ensure_short_description(item):
     description = item.get("description", "").strip()
     disclaimer = "Informational content only. Consult your doctor."
     if disclaimer.lower() not in description.lower():
-        description = (description + "\\n\\n" + disclaimer).strip()
+        description = (description + "\n\n" + disclaimer).strip()
     item["description"] = description[:5000]
 
 
@@ -91,7 +89,7 @@ HISTORY_FIELDS = [
     "source_urls",
     "duration_seconds",
     "topic_score",
-    "hook_prompt",
+    "opening_hook",
 ]
 
 
@@ -756,6 +754,10 @@ def validate_videos(result, feed_items, history):
                 continue
 
             video["topic_score"] = score_topic(video["topic"], video["title"], video["script"])
+            if video["topic_score"] < MIN_TOPIC_SCORE:
+                print("Rejected low-relevance topic (score " + str(video["topic_score"]) + "/10): " + title)
+                rejected_topics.add(topic)
+                continue
             first_sentence = re.split(r"(?<=[.!?])\\s+", video["script"].strip(), maxsplit=1)[0]
             if len(first_sentence.split()) > 12:
                 print(f"Rejected hook longer than 12 words: {title}")
@@ -1203,7 +1205,7 @@ def append_history(item, video_id, video_url):
         ),
         "duration_seconds": item.get("duration_seconds", ""),
         "topic_score": item.get("topic_score", ""),
-        "hook_prompt": item.get("hook_prompt", hook_prompt_used(item.get("script", ""))),
+        "opening_hook": item.get("opening_hook", opening_hook(item.get("script", ""))),
     }
 
     exists = (
