@@ -384,11 +384,17 @@ def call_openrouter(feed_items, history):
     ]
     prompt = f"""
 You write evidence-based YouTube Shorts for adults 50+, in natural American English.
-Create exactly THREE distinct scripts, each 85-120 spoken words, with a strong
-first-3-second hook, practical value early, accurate claims, and 8-12 ordered
-Pexels search phrases. Avoid medical diagnosis, cures, invented statistics,
-unsupported causal claims, and advice to change medication. Use only supplied
-articles and exact source URLs. Include this disclaimer in every description:
+Create exactly THREE distinct scripts, each 85-120 spoken words, with a
+specific curiosity-driven first-sentence hook that earns attention in the first
+2 seconds, delivers the useful point by the first 8 seconds, and avoids
+sensationalism or misleading promises. Use short, natural spoken sentences,
+clear transitions, one memorable takeaway, and a brief, non-pushy invitation
+to subscribe for evidence-based healthy-aging videos. Make each Short's angle
+distinct even when articles share a broad subject. Accurate claims and source
+fidelity take priority over retention tricks. Include 8-12 ordered Pexels search
+phrases. Avoid medical diagnosis, cures, invented statistics, unsupported causal
+claims, and advice to change medication. Use only supplied articles and exact
+source URLs. Include this disclaimer in every description:
 "This video is for educational purposes only and is not a substitute for professional medical advice."
 Each object must contain topic,title,script,visual_terms,description,tags,source_urls.
 Avoid these prior topics/titles: {json.dumps(previous, ensure_ascii=False)}
@@ -396,7 +402,9 @@ Research articles: {json.dumps(feed_items, ensure_ascii=False)}
 Also create exactly ONE horizontal long-form video:
 - 600-750 spoken words, approximately five minutes.
 - A distinct topic not used by any Short.
-- A clear opening, 3-5 developed sections, practical takeaways and concise conclusion.
+- A compelling but accurate opening in the first 15 seconds; explain the viewer benefit immediately.
+- 3-5 developed sections with clear signposting, varied pacing, practical takeaways and a concise conclusion.
+- Include a natural, non-pushy invitation to subscribe and watch a related video.
 - Evidence-based health education for adults 50+; no diagnosis, cure claims, invented statistics or medication changes.
 - Use only supplied articles and exact source URLs.
 - Include 12-18 ordered Pexels visual search phrases, description and tags.
@@ -424,7 +432,10 @@ Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
     print("Gemini is preparing the final scripts...")
     final_prompt = (
         "Revise this draft using the reviewer feedback when available. Keep exactly three Shorts "
-        "and exactly one long_video. Shorts must be 85-120 words. The long_video must be "
+        "and exactly one long_video. Shorts must be 85-120 words, open with a truthful curiosity hook, "
+        "deliver value early, use natural spoken language, and end with a brief, non-pushy subscribe invitation. "
+        "The long_video must open with a clear viewer benefit, use signposted sections, practical takeaways, "
+        "and a natural subscribe/related-video invitation. The long_video must be "
         "600-750 words for approximately five minutes of narration, with fields "
         "topic,title,script,visual_terms,description,tags,source_urls. Use only exact source URLs "
         "present in supplied articles. Do not introduce unsupported claims. Return JSON only.\n\n"
@@ -538,10 +549,26 @@ def validate_long_video(result, feed_items, history, shorts):
         raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
 
     topic = normalize(item["topic"])
+    title = normalize(item["title"])
     short_topics = {normalize(short.get("topic", "")) for short in shorts}
+    short_titles = {normalize(short.get("title", "")) for short in shorts}
     old_topics = {normalize(row.get("topic", "")) for row in history}
+    old_titles = {normalize(row.get("title", "")) for row in history}
+
+    # Prevent a long-form upload from repeating an existing title or an
+    # already-published research package, even when Gemini paraphrases the topic.
+    source_fingerprint = frozenset(sources)
+    old_source_fingerprints = {
+        frozenset(url for url in re.split(r"\\s+", row.get("source_urls", "").strip()) if url)
+        for row in history
+        if row.get("source_urls", "").strip()
+    }
     if topic in short_topics or topic in old_topics:
         raise RuntimeError("Long video topic duplicates a Short or a previous publication.")
+    if title in short_titles or title in old_titles:
+        raise RuntimeError("Long video title duplicates a Short or a previous publication.")
+    if source_fingerprint and source_fingerprint in old_source_fingerprints:
+        raise RuntimeError("Long video repeats the exact source set of a previous publication.")
 
     terms = item["visual_terms"]
     if isinstance(terms, str):
