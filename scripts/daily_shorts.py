@@ -68,7 +68,7 @@ def score_topic(topic, title, script):
 
 def opening_hook(script):
     """Return the actual first spoken sentence for analytics."""
-    first_sentence = re.split(r"(?<=[.!?])\\s+", (script or "").strip(), maxsplit=1)[0]
+    first_sentence = re.split(r"(?<=[.!?])\s+", (script or "").strip(), maxsplit=1)[0]
     return first_sentence[:300]
 
 
@@ -759,7 +759,7 @@ def validate_videos(result, feed_items, history):
                 print("Rejected low-relevance topic (score " + str(video["topic_score"]) + "/10): " + title)
                 rejected_topics.add(topic)
                 continue
-            first_sentence = re.split(r"(?<=[.!?])\\s+", video["script"].strip(), maxsplit=1)[0]
+            first_sentence = re.split(r"(?<=[.!?])\s+", video["script"].strip(), maxsplit=1)[0]
             if len(first_sentence.split()) > 12:
                 print(f"Rejected hook longer than 12 words: {title}")
                 continue
