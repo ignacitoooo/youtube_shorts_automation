@@ -39,6 +39,49 @@ PENDING_FILE = Path(os.getenv("PENDING_FILE", "data/pendientes_publicacion.json"
 VIDEO_DIR = Path(os.getenv("VIDEO_WORKDIR", "MoneyPrinterTurbo"))
 UPLOAD_DIR = VIDEO_DIR / "upload_queue"
 
+MAX_VIDEOS_PER_DAY = max(1, min(3, int(os.getenv("MAX_VIDEOS_PER_DAY", "3"))))
+SHORT_HISTORY_FIELDS = [
+    "date_utc", "topic", "title", "video_id", "video_url", "source_urls",
+    "duration_seconds", "topic_score", "hook_prompt",
+]
+SUBSCRIBE_CTAS = [
+    "Follow The Healthy Years for one practical healthy-aging habit after 50.",
+    "Subscribe for clear, science-based ways to support your health after 50.",
+    "Follow along for practical health insights you can use at any age.",
+    "Subscribe to make evidence-based healthy habits part of your day.",
+]
+
+
+def score_topic(topic, title, script):
+    """Transparent 1-10 editorial score: audience fit, everyday relevance, actionability."""
+    text = normalize(" ".join([topic, title, script[:500]]))
+    audience_terms = ("after 50", "over 50", "older adults", "aging", "ageing", "senior", "menopause", "midlife")
+    everyday_terms = ("protein", "joint", "gut", "digest", "lung", "heart", "sleep", "muscle",
+                      "bone", "blood pressure", "walking", "food", "fiber", "fibre", "habit",
+                      "memory", "brain", "energy", "balance", "mobility", "nutrition")
+    action_terms = ("habit", "what to eat", "how to", "steps", "daily", "today", "avoid",
+                    "include", "ask your doctor", "ask your", "change", "exercise", "walk")
+    score = 3
+    score += 2 if any(term in text for term in audience_terms) else 0
+    score += 2 if any(term in text for term in everyday_terms) else 0
+    score += 2 if any(term in text for term in action_terms) else 0
+    score += 1 if any(term in text for term in ("3 ", "three ", "simple", "practical", "habit")) else 0
+    return max(1, min(10, score))
+
+
+def hook_prompt_used(script):
+    first_sentence = re.split(r"(?<=[.!?])\\s+", (script or "").strip(), maxsplit=1)[0]
+    return first_sentence[:300]
+
+
+def ensure_short_description(item):
+    description = item.get("description", "").strip()
+    disclaimer = "Informational content only. Consult your doctor."
+    if disclaimer.lower() not in description.lower():
+        description = (description + "\\n\\n" + disclaimer).strip()
+    item["description"] = description[:5000]
+
+
 HISTORY_FIELDS = [
     "date_utc",
     "topic",
@@ -46,6 +89,9 @@ HISTORY_FIELDS = [
     "video_id",
     "video_url",
     "source_urls",
+    "duration_seconds",
+    "topic_score",
+    "hook_prompt",
 ]
 
 
@@ -384,18 +430,23 @@ def call_openrouter(feed_items, history):
     ]
     prompt = f"""
 You write evidence-based YouTube Shorts for adults 50+, in natural American English.
-Create exactly THREE distinct scripts, each 85-120 spoken words, with a
-specific curiosity-driven first-sentence hook that earns attention in the first
-2 seconds, delivers the useful point by the first 8 seconds, and avoids
-sensationalism or misleading promises. Use short, natural spoken sentences,
-clear transitions, one memorable takeaway, and a brief, non-pushy invitation
-to subscribe for evidence-based healthy-aging videos. Make each Short's angle
-distinct even when articles share a broad subject. Accurate claims and source
-fidelity take priority over retention tricks. Include 8-12 ordered Pexels search
-phrases. Avoid medical diagnosis, cures, invented statistics, unsupported causal
-claims, and advice to change medication. Use only supplied articles and exact
-source URLs. Include this disclaimer in every description:
-"This video is for educational purposes only and is not a substitute for professional medical advice."
+Create exactly THREE distinct YouTube Shorts scripts in natural American English for adults 50+.
+Each spoken script must be 85-120 words and follow this exact pacing:
+HOOK (0-2s): the FIRST sentence is a direct question, striking evidence-based statement, or concrete fact;
+maximum 12 words. No introduction and never begin with "A new study says", "Researchers have found", or similar.
+KEY FINDING (2-15s): explain the study result and name its evidence type/limitation when relevant.
+PRACTICAL ACTION (15-30s): end the educational body with something viewers can consider doing today,
+such as a safe everyday habit or a useful question to ask their clinician. Never prescribe treatment.
+CLOSE (final ~5s): add one short, non-pushy subscribe invitation. Rotate naturally among these styles:
+"Follow The Healthy Years for one practical healthy-aging habit after 50";
+"Subscribe for clear, science-based ways to support your health after 50";
+"Follow along for practical health insights you can use at any age";
+"Subscribe to make evidence-based healthy habits part of your day".
+Use cautious wording ("may", "might", "could", "in this study") and no absolute promises.
+Prioritize concrete body systems, daily habits and practical benefits for adults over 50.
+Include 8-12 ordered Pexels search phrases. Use only supplied articles and exact source URLs.
+Do not invent statistics, diagnoses, cures, unsupported causal claims or medication advice.
+Every description must name the study/source and include: "Informational content only. Consult your doctor."
 Each object must contain topic,title,script,visual_terms,description,tags,source_urls.
 Avoid these prior topics/titles: {json.dumps(previous, ensure_ascii=False)}
 Research articles: {json.dumps(feed_items, ensure_ascii=False)}
@@ -690,6 +741,14 @@ def validate_videos(result, feed_items, history):
                 print(f"Rejected without a supplied source: {title}")
                 continue
 
+            video["topic_score"] = score_topic(video["topic"], video["title"], video["script"])
+            first_sentence = re.split(r"(?<=[.!?])\\s+", video["script"].strip(), maxsplit=1)[0]
+            if len(first_sentence.split()) > 12:
+                print(f"Rejected hook longer than 12 words: {title}")
+                continue
+            ensure_short_description(video)
+            if not any(cta.lower() in video["script"].lower() for cta in SUBSCRIBE_CTAS):
+                video["script"] = video["script"].rstrip() + " " + SUBSCRIBE_CTAS[len(accepted) % len(SUBSCRIBE_CTAS)]
             word_count = len(video["script"].split())
             if word_count < 85 or word_count > 120:
                 print(f"Short script has {word_count} words; requesting a Gemini repair: {title}")
@@ -1127,7 +1186,10 @@ def append_history(item, video_id, video_url):
 
         "source_urls": " ".join(
             item["source_urls"]
-        )
+        ),
+        "duration_seconds": item.get("duration_seconds", ""),
+        "topic_score": item.get("topic_score", ""),
+        "hook_prompt": item.get("hook_prompt", hook_prompt_used(item.get("script", ""))),
     }
 
     exists = (
@@ -1200,6 +1262,9 @@ def main():
         feed_items = get_research()
         result = call_openrouter(feed_items, history)
         shorts = validate_videos(result, feed_items, history)
+        shorts.sort(key=lambda item: item.get("topic_score", 0), reverse=True)
+        shorts = shorts[:MAX_VIDEOS_PER_DAY]
+        print(f"Selected top {len(shorts)} Short(s) by topic score (MAX_VIDEOS_PER_DAY={MAX_VIDEOS_PER_DAY}).")
         long_video = validate_long_video(result, feed_items, history, shorts)
 
         videos = []
