@@ -857,8 +857,8 @@ def validate_mp4(path, expected_aspect):
     if expected_aspect == "9:16":
         if ratio >= 1:
             raise RuntimeError(f"Expected vertical 9:16 video, got {width}x{height}.")
-        if duration > 180:
-            raise RuntimeError(f"Short exceeds YouTube Shorts 3-minute limit: {duration:.1f}s.")
+        if duration > 60:
+            raise RuntimeError(f"Short exceeds configured 60-second limit: {duration:.1f}s.")
     elif expected_aspect == "16:9":
         if ratio <= 1.2:
             raise RuntimeError(f"Expected horizontal 16:9 video, got {width}x{height}.")
