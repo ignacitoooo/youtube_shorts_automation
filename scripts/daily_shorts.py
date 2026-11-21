@@ -616,10 +616,19 @@ def validate_long_video(result, feed_items, history, shorts):
     if not isinstance(item, dict) or not all(item.get(key) for key in required):
         raise RuntimeError("Gemini did not provide a complete long_video object.")
 
-    allowed_urls = {article["url"] for article in feed_items}
+    allowed_urls = {
+        article["url"] for article in feed_items
+        if isinstance(article, dict) and isinstance(article.get("url"), str)
+    }
     sources = item["source_urls"]
-    if not isinstance(sources, list) or not sources or not set(sources).issubset(allowed_urls):
-        raise RuntimeError("Long video contains missing or unverified source URLs.")
+    if (
+        not isinstance(sources, list)
+        or not sources
+        or not all(isinstance(url, str) and url.strip() for url in sources)
+        or not set(sources).issubset(allowed_urls)
+    ):
+        raise RuntimeError("Long video contains missing, invalid, or unverified source URLs.")
+    item["source_urls"] = list(dict.fromkeys(sources))
 
     words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
     if not 600 <= words <= 750:
@@ -657,8 +666,12 @@ def validate_long_video(result, feed_items, history, shorts):
     terms = item["visual_terms"]
     if isinstance(terms, str):
         terms = [term.strip() for term in terms.split(",") if term.strip()]
-    if not isinstance(terms, list) or len(terms) < 8:
-        raise RuntimeError("Long video must include at least 8 visual search phrases.")
+    if (
+        not isinstance(terms, list)
+        or len(terms) < 8
+        or not all(isinstance(term, str) and term.strip() for term in terms)
+    ):
+        raise RuntimeError("Long video must include at least 8 valid visual search phrases.")
     item["visual_terms"] = terms
     print(f"Validated long video: {item['title']} ({words} words)")
     return item
