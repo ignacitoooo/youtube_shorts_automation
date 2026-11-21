@@ -434,6 +434,27 @@ def repair_content_json(raw_text, articles, stage):
     return ensure_content_shape(repaired, stage + " repaired")
 
 
+def repair_replacement_videos_json(raw_text, articles, expected_count, stage):
+    """Repair a replacement-only response without requiring a long_video object."""
+    repair_prompt = (
+        "Convert the response below into valid JSON only. It must contain exactly one key, "
+        '"videos", with a list of exactly ' + str(expected_count) + " replacement Short objects. "
+        "Each object must contain topic,title,script,visual_terms,description,tags,source_urls. "
+        "Preserve factual content and exact source URLs; do not add facts or a long_video field. "
+        "Return no Markdown fences or commentary.\n\n"
+        "Allowed source articles and URLs:\n" + json.dumps(articles, ensure_ascii=False)
+        + "\n\nMalformed response:\n" + (raw_text or "")[:24000]
+    )
+    print(f"Requesting replacement-only JSON repair for {stage}...")
+    repaired = parse_gemini_json(gemini_text(repair_prompt), stage + " repaired")
+    videos = repaired.get("videos")
+    if not isinstance(videos, list) or len(videos) != expected_count:
+        raise RuntimeError(
+            f"Gemini {stage} repair must contain exactly {expected_count} replacement videos."
+        )
+    return {"videos": videos}
+
+
 def call_openrouter(feed_items, history):
     """Compatibility name: Gemini drafts, Grok critiques, Gemini revises."""
     previous = [
@@ -801,7 +822,9 @@ def validate_videos(result, feed_items, history):
         try:
             generated = parse_gemini_json(generated_text, f"replacement Shorts {attempt}")
         except RuntimeError:
-            generated = repair_content_json(generated_text, feed_items, f"replacement Shorts {attempt}")
+            generated = repair_replacement_videos_json(
+                generated_text, feed_items, missing, f"replacement Shorts {attempt}"
+            )
         replacement_videos = generated.get("videos", [])
         if not isinstance(replacement_videos, list) or not replacement_videos:
             print("Gemini returned no usable replacement Shorts.")
