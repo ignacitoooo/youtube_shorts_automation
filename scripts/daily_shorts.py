@@ -137,7 +137,7 @@ def load_history():
             writer = csv.DictWriter(file, fieldnames=HISTORY_FIELDS)
             writer.writeheader()
             for row in rows:
-                writer.writerow({field: row.get(field, "") for field in HISTORY_FIELDS})
+                writer.writerow({field: ((row.get(field, "") or row.get("hook_prompt", "")) if field == "opening_hook" else row.get(field, "")) for field in HISTORY_FIELDS})
         temporary.replace(HISTORY)
 
     return rows
@@ -643,86 +643,67 @@ def validate_long_video(result, feed_items, history, shorts):
     return item
 
 
-def repair_short_script(video, feed_items, valid_urls):
-    """Regenerate an out-of-range Short script without changing its verified sources."""
+def repair_short_script(video, feed_items, valid_urls, required_cta):
+    """Repair a Short while preserving verified sources, the required CTA and word limit."""
     articles_by_url = {
-        article["url"]: article
-        for article in feed_items
+        article["url"]: article for article in feed_items
         if article.get("url") in valid_urls
     }
     if not articles_by_url:
-        raise RuntimeError(
-            f"Cannot repair Short without a verified supplied source: {video.get('title', 'untitled')}"
-        )
+        raise RuntimeError(f"Cannot repair Short without a verified supplied source: {video.get('title', 'untitled')}")
 
     original_script = video["script"]
     for attempt in range(1, 3):
         prompt = (
             "Rewrite ONLY the spoken script for this evidence-based YouTube Short. "
             "Return JSON only as an object with exactly one string field named script. "
-            "The script must contain 90-105 whitespace-separated words (never fewer than 85 "
-            "or more than 120), sound natural when narrated, and retain a strong hook. "
-            "Use only facts supported by the supplied source article(s); do not invent "
-            "statistics, diagnoses, cures, causal claims, or medication advice. "
-            "Do not add or change sources. End with one of these exact short subscribe CTAs: "
-            + json.dumps(SUBSCRIBE_CTAS) + ". Keep the complete script within 85-120 words.\n\n"
-            "TITLE: " + video["title"] + "\n"
-            "TOPIC: " + video["topic"] + "\n"
-            "VERIFIED SOURCE ARTICLES:\n"
+            "The complete script INCLUDING the final CTA must contain 85-120 whitespace-separated words, ideally 90-105. "
+            "Keep a strong hook of no more than 12 words. Use only facts supported by the supplied articles; "
+            "do not invent statistics, diagnoses, cures, causal claims, or medication advice. "
+            "End with this exact CTA: " + required_cta + ". Do not add or change sources.\n\n"
+            "TITLE: " + video["title"] + "\nTOPIC: " + video["topic"] + "\nVERIFIED SOURCE ARTICLES:\n"
             + json.dumps(list(articles_by_url.values()), ensure_ascii=False)
             + "\n\nCURRENT SCRIPT:\n" + original_script
         )
-        print(
-            f"Repairing Short script ({attempt}/2): {video['title']}"
-        )
-        repaired = parse_gemini_json(
-            gemini_text(prompt),
-            f"Short script repair {attempt}"
-        )
+        print(f"Repairing Short script ({attempt}/2): {video['title']}")
+        repaired = parse_gemini_json(gemini_text(prompt), f"Short script repair {attempt}")
         candidate = repaired.get("script")
         if not isinstance(candidate, str) or not candidate.strip():
             print("Gemini script repair returned no usable script.")
             continue
-
+        candidate = candidate.strip()
+        if required_cta.lower() not in candidate.lower():
+            candidate = candidate.rstrip() + " " + required_cta
         word_count = len(candidate.split())
-        if 85 <= word_count <= 120:
-            video["script"] = candidate.strip()
+        first_sentence = re.split(r"(?<=[.!?])\s+", candidate, maxsplit=1)[0]
+        if 85 <= word_count <= 120 and len(first_sentence.split()) <= 12:
+            video["script"] = candidate
             video["source_urls"] = list(valid_urls)
-            print(
-                f"Short script repaired and validated: {word_count} words."
-            )
+            print(f"Short script repaired and validated: {word_count} words.")
             return video
-
-        print(
-            f"Repaired script still has {word_count} words; "
-            "it will be retried."
-        )
-
+        print(f"Repaired script has {word_count} words or an overlong hook; retrying.")
     raise RuntimeError(
-        f"Gemini could not produce an 85-120 word Short after two repairs: "
+        f"Gemini could not produce an 85-120 word Short with a valid hook and CTA after two repairs: "
         f"{video.get('title', 'untitled')}. Nothing will be uploaded."
     )
 
 
 def validate_videos(result, feed_items, history):
-    """Accept three unique, source-backed Shorts; ask Gemini for replacements when needed."""
+    """Accept the configured number of unique, source-backed Shorts."""
     videos = result.get("videos", [])
     if not isinstance(videos, list):
         raise RuntimeError("The AI response does not contain a valid videos list.")
 
-    allowed_urls = {item["url"] for item in feed_items}
+    target_count = MAX_VIDEOS_PER_DAY
+    allowed_urls = {item["url"] for item in feed_items if isinstance(item.get("url"), str)}
     old_topics = {normalize(row.get("topic", "")) for row in history}
     old_titles = {normalize(row.get("title", "")) for row in history}
-
-    accepted = []
-    seen_topics = set()
-    seen_titles = set()
-    rejected_topics = set()
-    rejected_titles = set()
+    accepted, seen_topics, seen_titles = [], set(), set()
+    rejected_topics, rejected_titles = set(), set()
 
     def inspect_candidates(candidates):
         for video in candidates:
-            if len(accepted) == 3:
+            if len(accepted) >= target_count:
                 break
             if not isinstance(video, dict):
                 continue
@@ -730,12 +711,14 @@ def validate_videos(result, feed_items, history):
             if not all(video.get(key) for key in required):
                 print("Rejected incomplete AI response.")
                 continue
-
-            topic = normalize(video["topic"])
-            title = normalize(video["title"])
-            if not topic or not title:
+            if not all(isinstance(video.get(key), str) and video[key].strip()
+                       for key in ["topic", "title", "script", "description"]):
+                print("Rejected Short with invalid text fields.")
                 continue
 
+            topic, title = normalize(video["topic"]), normalize(video["title"])
+            if not topic or not title:
+                continue
             if topic in old_topics or topic in seen_topics:
                 print(f"Repeated topic rejected: {topic}")
                 rejected_topics.add(topic)
@@ -746,69 +729,72 @@ def validate_videos(result, feed_items, history):
                 continue
 
             source_urls = video["source_urls"]
-            if not isinstance(source_urls, list):
+            if not isinstance(source_urls, list) or not all(isinstance(url, str) for url in source_urls):
                 print(f"Rejected invalid source list: {title}")
                 continue
-            valid_urls = [url for url in source_urls if url in allowed_urls]
+            valid_urls = list(dict.fromkeys(url for url in source_urls if url in allowed_urls))
             if not valid_urls:
                 print(f"Rejected without a supplied source: {title}")
                 continue
 
+            terms = video["visual_terms"]
+            if isinstance(terms, str):
+                terms = [term.strip() for term in terms.split(",") if term.strip()]
+            if not isinstance(terms, list) or len(terms) < 8 or not all(isinstance(term, str) and term.strip() for term in terms):
+                print(f"Rejected Short with fewer than 8 valid visual search phrases: {title}")
+                continue
+            video["visual_terms"] = terms
+
             video["topic_score"] = score_topic(video["topic"], video["title"], video["script"])
             if video["topic_score"] < MIN_TOPIC_SCORE:
-                print("Rejected low-relevance topic (score " + str(video["topic_score"]) + "/10): " + title)
+                print(f"Rejected low-relevance topic (score {video['topic_score']}/10): {title}")
                 rejected_topics.add(topic)
                 continue
+
             first_sentence = re.split(r"(?<=[.!?])\s+", video["script"].strip(), maxsplit=1)[0]
             if len(first_sentence.split()) > 12:
                 print(f"Rejected hook longer than 12 words: {title}")
                 continue
+
             ensure_short_description(video)
+            required_cta = SUBSCRIBE_CTAS[len(accepted) % len(SUBSCRIBE_CTAS)]
             if not any(cta.lower() in video["script"].lower() for cta in SUBSCRIBE_CTAS):
-                video["script"] = video["script"].rstrip() + " " + SUBSCRIBE_CTAS[len(accepted) % len(SUBSCRIBE_CTAS)]
+                video["script"] = video["script"].rstrip() + " " + required_cta
             word_count = len(video["script"].split())
             if word_count < 85 or word_count > 120:
                 print(f"Short script has {word_count} words; requesting a Gemini repair: {title}")
-                video = repair_short_script(video, feed_items, valid_urls)
+                video = repair_short_script(video, feed_items, valid_urls, required_cta)
                 word_count = len(video["script"].split())
-
-            if word_count < 85 or word_count > 120:
-                raise RuntimeError(
-                    f"Short script remains outside 85-120 words after repair: {title}. Nothing will be uploaded."
-                )
+            if not 85 <= word_count <= 120:
+                raise RuntimeError(f"Short script remains outside 85-120 words after repair: {title}. Nothing will be uploaded.")
+            if not any(cta.lower() in video["script"].lower() for cta in SUBSCRIBE_CTAS):
+                raise RuntimeError(f"Short has no valid subscribe CTA after repair: {title}. Nothing will be uploaded.")
 
             video["source_urls"] = valid_urls
             accepted.append(video)
             seen_topics.add(topic)
             seen_titles.add(title)
-            print(f"Accepted unique Short: {title} ({word_count} words)")
+            print(f"Accepted unique Short: {title} ({word_count} words, topic score {video['topic_score']}/10)")
 
     inspect_candidates(videos)
-
-    # Gemini sometimes ignores the exclusion list. Generate fresh replacements
-    # instead of weakening duplicate-topic/title or source-verification rules.
     for attempt in range(1, 3):
-        missing = 3 - len(accepted)
+        missing = target_count - len(accepted)
         if missing <= 0:
             break
-
         excluded = {
             "previous_topics": sorted(old_topics | seen_topics | rejected_topics),
             "previous_titles": sorted(old_titles | seen_titles | rejected_titles),
         }
         prompt = (
-            "Create exactly " + str(missing) + " replacement YouTube Shorts in natural American English "
-            "for adults 50+. These are replacements for rejected duplicate ideas. "
-            "Every replacement must use a genuinely NEW topic and a NEW title not present in the exclusion lists. "
-            "Each spoken script must be 85-120 words, ideally 90-105. "
-            "Use only facts in the supplied articles and exact supplied source URLs. "
-            "Do not invent statistics, diagnoses, cures, causal claims or medication advice. "
-            "Include a strong opening, practical value, 8-12 ordered Pexels visual search phrases, "
-            "description, tags and source_urls. Include the educational medical disclaimer in each description. "
-            "Return JSON only in the shape {\"videos\":[...]}.\n\n"
-            "EXCLUSIONS:\n" + json.dumps(excluded, ensure_ascii=False)
-            + "\n\nSUPPLIED SOURCE ARTICLES:\n"
-            + json.dumps(feed_items, ensure_ascii=False)
+            "Create exactly " + str(missing) + " replacement YouTube Shorts in natural American English for adults 50+. "
+            "Every replacement must use a genuinely NEW topic and title. Each spoken script INCLUDING its final subscribe CTA "
+            "must be 85-120 words, ideally 90-105. The first spoken sentence must be no more than 12 words. "
+            "Use only facts in the supplied articles and exact supplied source URLs. Do not invent statistics, diagnoses, cures, "
+            "causal claims or medication advice. Include 8-12 ordered Pexels visual search phrases, description, tags and source_urls. "
+            "Include the educational medical disclaimer in each description and end each script with one exact CTA from this list: "
+            + json.dumps(SUBSCRIBE_CTAS) + ". Return JSON only in the shape {\"videos\":[...]}."
+            + "\n\nEXCLUSIONS:\n" + json.dumps(excluded, ensure_ascii=False)
+            + "\n\nSUPPLIED SOURCE ARTICLES:\n" + json.dumps(feed_items, ensure_ascii=False)
         )
         print(f"Requesting {missing} unique replacement Short(s) from Gemini ({attempt}/2)...")
         generated_text = gemini_text(prompt)
@@ -816,29 +802,22 @@ def validate_videos(result, feed_items, history):
             generated = parse_gemini_json(generated_text, f"replacement Shorts {attempt}")
         except RuntimeError:
             generated = repair_content_json(generated_text, feed_items, f"replacement Shorts {attempt}")
-
         replacement_videos = generated.get("videos", [])
         if not isinstance(replacement_videos, list) or not replacement_videos:
             print("Gemini returned no usable replacement Shorts.")
             continue
-
         before_count = len(accepted)
         inspect_candidates(replacement_videos)
         if len(accepted) == before_count:
             print("No new valid Shorts accepted in this replacement attempt.")
 
-    if len(accepted) != 3:
+    if len(accepted) != target_count:
         raise RuntimeError(
-            f"Only {len(accepted)} valid unique Shorts passed validation after two replacement attempts. "
+            f"Only {len(accepted)} valid unique Shorts passed validation; expected {target_count}. "
             "Duplicate and source protections remain enabled. Nothing will be uploaded."
         )
-
     return accepted
 
-
-# ============================================================
-# GENERATE VIDEO WITH MONEYPRINTERTURBO
-# ============================================================
 
 def validate_mp4(path, expected_aspect):
     """Use ffprobe to reject corrupt, empty, or incorrectly oriented renders."""
