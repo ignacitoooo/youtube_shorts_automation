@@ -559,7 +559,7 @@ def validate_long_video(result, feed_items, history, shorts):
     # already-published research package, even when Gemini paraphrases the topic.
     source_fingerprint = frozenset(sources)
     old_source_fingerprints = {
-        frozenset(url for url in re.split(r"\\s+", row.get("source_urls", "").strip()) if url)
+        frozenset(url for url in re.split(r"\s+", row.get("source_urls", "").strip()) if url)
         for row in history
         if row.get("source_urls", "").strip()
     }
