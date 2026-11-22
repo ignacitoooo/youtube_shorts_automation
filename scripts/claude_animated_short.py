@@ -256,6 +256,10 @@ def main():
          "-b:a", "192k", "-shortest", "-movflags", "+faststart", str(final)])
     duration = probe(final)
     print(f"Audio/video validated: {final} ({duration:.1f}s).")
+    dry_run = os.getenv("DRY_RUN", "true").strip().lower() in {"1", "true", "yes"}
+    if dry_run:
+        print("DRY RUN: rendered MP4 has verified video and audio; YouTube upload skipped.")
+        return
     video_id = upload(final, story)
     previous.append({"title": story["title"], "video_id": video_id, "duration": duration,
                      "source_urls": story["source_urls"]})
