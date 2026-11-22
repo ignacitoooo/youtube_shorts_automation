@@ -348,8 +348,11 @@ def gemini_text(prompt):
         except RuntimeError as exc:
             last_error = exc
             is_transient = any(marker.lower() in str(exc).lower() for marker in retryable_markers)
-            if not is_transient or index == len(models) - 1:
+            if not is_transient:
                 raise
+            if index == len(models) - 1:
+                print(f"Gemini fallback chain exhausted at {model}; proceeding to Claude fallback if configured.")
+                break
             print(
                 f"Gemini model {model} remains unavailable after retries; "
                 f"trying fallback {models[index + 1]}."
