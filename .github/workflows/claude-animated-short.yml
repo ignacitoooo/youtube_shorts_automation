@@ -26,10 +26,10 @@ jobs:
       - name: Check required secrets
         id: preflight
         env:
-          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
-          YT_CLIENT_ID: \${{ secrets.YT_CLIENT_ID }}
-          YT_CLIENT_SECRET: \${{ secrets.YT_CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: \${{ secrets.YT_REFRESH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$YT_CLIENT_ID" ] || [ -z "$YT_CLIENT_SECRET" ] || [ -z "$YT_REFRESH_TOKEN" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -59,12 +59,12 @@ jobs:
       - name: Generate, narrate, validate audio and publish animated Short
         if: steps.preflight.outputs.ready == 'true'
         env:
-          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: claude-sonnet-5-5
           DRY_RUN: "true"
-          YT_CLIENT_ID: \${{ secrets.YT_CLIENT_ID }}
-          YT_CLIENT_SECRET: \${{ secrets.YT_CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: \${{ secrets.YT_REFRESH_TOKEN }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
         run: python scripts/claude_animated_short.py
 
       - name: Save animated Short artifacts
