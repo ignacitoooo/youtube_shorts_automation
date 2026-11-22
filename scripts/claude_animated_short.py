@@ -192,8 +192,8 @@ def probe(path):
     if int(video["width"]) >= int(video["height"]):
         raise RuntimeError("Animated Short must be vertical.")
     duration = float(data["format"]["duration"])
-    if not 20 <= duration <= 45:
-        raise RuntimeError(f"Final Short duration {duration:.1f}s is outside 20-45s.")
+    if not 20 <= duration <= 40:
+        raise RuntimeError(f"Final Short duration {duration:.1f}s is outside 20-40s.")
     return duration
 
 def upload(path, story):
