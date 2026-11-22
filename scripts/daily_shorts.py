@@ -547,26 +547,58 @@ def validate_long_video(result, feed_items, history, shorts):
         raise RuntimeError("Gemini did not provide a complete long_video object.")
 
     allowed_urls = {article["url"] for article in feed_items}
+    short_topics = {normalize(short.get("topic", "")) for short in shorts}
+    old_topics = {normalize(row.get("topic", "")) for row in history}
+    excluded_topics = short_topics | old_topics
+
+    # Gemini can occasionally ignore the distinct-topic instruction. Ask it for
+    # a genuinely different long-form concept instead of aborting the workflow.
+    for attempt in range(1, 3):
+        topic = normalize(item.get("topic", ""))
+        if topic and topic not in excluded_topics:
+            break
+        print(f"Long video topic duplicates a Short or previous publication; requesting a new topic ({attempt}/2).")
+        prompt = (
+            "Create ONE replacement horizontal YouTube health video for adults 50+ in natural American English. "
+            "Its topic AND title must be clearly distinct from every excluded topic/title below and from one another. "
+            "Do not merely rephrase an excluded topic. Choose a different evidence-based health subject supported "
+            "by the supplied articles. Return JSON only with one object named long_video containing exactly these "
+            "fields: topic,title,script,visual_terms,description,tags,source_urls. "
+            "The spoken script must be 600-750 words. Include 12-18 useful ordered Pexels visual search phrases. "
+            "Use only exact source URLs from the supplied articles. Do not invent facts, statistics, diagnoses, "
+            "cures, causal claims or medication advice. Include the educational medical disclaimer in description.\n\n"
+            "EXCLUDED TOPICS AND TITLES:\n" + json.dumps({
+                "topics": sorted(excluded_topics),
+                "previous_publications": [
+                    {"topic": row.get("topic", ""), "title": row.get("title", "")}
+                    for row in history[-500:]
+                ],
+                "shorts": [{"topic": s.get("topic", ""), "title": s.get("title", "")} for s in shorts],
+            }, ensure_ascii=False)
+            + "\n\nSUPPLIED SOURCE ARTICLES:\n"
+            + json.dumps(feed_items, ensure_ascii=False)
+        )
+        replacement = parse_gemini_json(gemini_text(prompt), f"replacement long video {attempt}")
+        candidate = replacement.get("long_video", replacement)
+        if not isinstance(candidate, dict) or not all(candidate.get(key) for key in required):
+            raise RuntimeError("Gemini did not provide a complete replacement long_video object.")
+        item = candidate
+    topic = normalize(item.get("topic", ""))
+    if not topic or topic in excluded_topics:
+        raise RuntimeError("Gemini could not generate a distinct long video topic after two attempts.")
+
     sources = item["source_urls"]
     if not isinstance(sources, list) or not sources or not set(sources).issubset(allowed_urls):
         raise RuntimeError("Long video contains missing or unverified source URLs.")
 
     words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
     if not 600 <= words <= 750:
-        print(
-            f"Long video script has {words} words; requesting Gemini expansion."
-        )
+        print(f"Long video script has {words} words; requesting Gemini expansion.")
         item = repair_long_video_script(item, feed_items, sources)
         words = len(re.findall(r"\b[\w'-]+\b", item["script"]))
 
     if not 600 <= words <= 750:
         raise RuntimeError(f"Long video script has {words} words; expected 600-750.")
-
-    topic = normalize(item["topic"])
-    short_topics = {normalize(short.get("topic", "")) for short in shorts}
-    old_topics = {normalize(row.get("topic", "")) for row in history}
-    if topic in short_topics or topic in old_topics:
-        raise RuntimeError("Long video topic duplicates a Short or a previous publication.")
 
     terms = item["visual_terms"]
     if isinstance(terms, str):
