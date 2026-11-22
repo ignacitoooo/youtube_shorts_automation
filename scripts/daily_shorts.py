@@ -242,9 +242,14 @@ def post_json(url, payload, headers, timeout=300, max_attempts=6):
 def gemini_text(prompt):
     """Use the configured Gemini model, then an official Flash-Lite fallback on capacity errors."""
     key = os.environ["GEMINI_API_KEY"]
+    # Try independent stable Flash variants when Google reports temporary
+    # capacity errors. The environment variable can override this ordered list.
     fallback_models = [
         model.strip()
-        for model in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",")
+        for model in os.getenv(
+            "GEMINI_FALLBACK_MODELS",
+            "gemini-3.5-flash-lite,gemini-3.6-flash"
+        ).split(",")
         if model.strip() and model.strip() != GEMINI_MODEL
     ]
     models = [GEMINI_MODEL] + fallback_models
