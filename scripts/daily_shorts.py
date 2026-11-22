@@ -343,22 +343,36 @@ def grok_review(draft, articles):
 
 
 def parse_gemini_json(text, stage):
-    """Parse strict JSON while tolerating Markdown fences and surrounding prose."""
+    """Parse Gemini JSON, tolerating fences, prose, unquoted keys and trailing commas."""
     cleaned = (text or "").strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start < 0 or end <= start:
+        raise RuntimeError(f"Gemini {stage} response did not contain a JSON object.")
+
+    candidate = cleaned[start:end + 1]
+    # Gemini occasionally emits JavaScript-style object keys or trailing commas.
+    # Quote only bare property names immediately following an object/array delimiter.
+    candidate = re.sub(
+        r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:',
+        r'\1"\2":',
+        candidate,
+    )
+    candidate = re.sub(r",\s*([}\]])", r"\1", candidate)
+
     try:
-        value = json.loads(cleaned)
-    except json.JSONDecodeError:
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start < 0 or end <= start:
-            raise RuntimeError(f"Gemini {stage} response did not contain a JSON object.")
-        try:
-            value = json.loads(cleaned[start:end + 1])
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Gemini {stage} response was not valid JSON.") from exc
+        value = json.loads(candidate)
+    except json.JSONDecodeError as exc:
+        snippet = candidate[max(0, exc.pos - 100):exc.pos + 100].replace("\n", " ")
+        raise RuntimeError(
+            f"Gemini {stage} response was not valid JSON "
+            f"(line {exc.lineno}, column {exc.colno}; near: {snippet!r})."
+        ) from exc
+
     if not isinstance(value, dict):
         raise RuntimeError(f"Gemini {stage} response must be a JSON object.")
     return value
