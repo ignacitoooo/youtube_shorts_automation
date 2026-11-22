@@ -108,7 +108,7 @@ jobs:
           HISTORY_FILE: data/historial_videos.csv
           PENDING_FILE: data/pendientes_publicacion.json
           VIDEO_WORKDIR: MoneyPrinterTurbo
-          DRY_RUN: "false"
+          DRY_RUN: "true"
           GROK_REVIEW_ENABLED: "false"
           MAX_VIDEOS_PER_DAY: "2"
           MIN_TOPIC_SCORE: "6"
