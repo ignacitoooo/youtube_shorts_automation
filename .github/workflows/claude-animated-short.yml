@@ -1,0 +1,92 @@
+name: The Healthy Years - Claude Animated Short
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 12 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: healthy-years-repository-writes
+  cancel-in-progress: false
+
+jobs:
+  animated-short:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/channel-growth-quality
+          fetch-depth: 0
+
+      - name: Check required secrets
+        id: preflight
+        env:
+          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          YT_CLIENT_ID: \${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: \${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: \${{ secrets.YT_REFRESH_TOKEN }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$YT_CLIENT_ID" ] || [ -z "$YT_CLIENT_SECRET" ] || [ -z "$YT_REFRESH_TOKEN" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Animated Short skipped: configure ANTHROPIC_API_KEY and YouTube secrets first."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install FFmpeg and Python dependencies
+        if: steps.preflight.outputs.ready == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          pip install cairosvg edge-tts google-api-python-client google-auth google-auth-httplib2
+
+      - name: Validate script syntax
+        if: steps.preflight.outputs.ready == 'true'
+        run: python -m py_compile scripts/claude_animated_short.py
+
+      - name: Generate, narrate, validate audio and publish animated Short
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          ANTHROPIC_API_KEY: \${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: claude-sonnet-5-5
+          YT_CLIENT_ID: \${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: \${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: \${{ secrets.YT_REFRESH_TOKEN }}
+        run: python scripts/claude_animated_short.py
+
+      - name: Save animated Short artifacts
+        if: always() && steps.preflight.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: healthy-years-claude-animated-short
+          path: artifacts/claude_short/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Commit animated publication history
+        if: always() && steps.preflight.outputs.ready == 'true'
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/animated_short_history.json
+          if git diff --cached --quiet; then
+            echo "No animated publication history changes."
+            exit 0
+          fi
+          git commit -m "Record Claude animated Short publication"
+          git fetch origin feature/channel-growth-quality
+          git rebase origin/feature/channel-growth-quality
+          git push origin HEAD:feature/channel-growth-quality
