@@ -38,7 +38,7 @@ Never commit API keys to the repository. Add them under Settings → Secrets and
 - 12:00 UTC: one Claude-authored animated Short.
 
 GitHub scheduled workflows run from the repository's default branch. The new workflow is
-deliberately skipped if its required secrets are absent. It does not publish a silent video:
+deliberately skipped if its required secrets are absent. Both publishing workflows currently use DRY_RUN=true, so they render and validate but do not upload until we explicitly switch them to live mode. It does not publish a silent video:
 FFprobe must find both video and audio streams, vertical dimensions, and a duration of 20-40
 seconds before the YouTube upload step is reached.
 
@@ -47,9 +47,9 @@ seconds before the YouTube upload step is reached.
 Before enabling the workflow on the default branch:
 1. Add ANTHROPIC_API_KEY to Actions secrets.
 2. Run python -m py_compile scripts/daily_shorts.py scripts/claude_animated_short.py.
-3. Run the animated workflow with YouTube upload disabled in a future test mode (not yet wired).
+3. Run the animated workflow in its built-in DRY_RUN=true mode.
 4. Review the generated MP4, voice, captions, storyboard and source list.
-5. Only then merge/enable automatic publishing.
+5. Only after review, change DRY_RUN to false and enable automatic publishing.
 
 The repository changes in this branch have not been run through GitHub Actions and no video has
 been uploaded as part of this implementation.
