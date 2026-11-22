@@ -646,10 +646,36 @@ def validate_videos(result, feed_items, history):
                 break
             if not isinstance(video, dict):
                 continue
-            required = ["topic", "title", "script", "visual_terms", "description", "source_urls"]
-            if not all(video.get(key) for key in required):
-                print("Rejected incomplete AI response.")
+            # Topic, title, narration and traceable sources are essential.
+            # Metadata can be safely completed locally if Gemini omits it.
+            essential = ["topic", "title", "script", "source_urls"]
+            missing = [key for key in essential if not video.get(key)]
+            if missing:
+                print(
+                    "Rejected AI candidate; missing essential fields: "
+                    + ", ".join(missing)
+                )
                 continue
+
+            if not video.get("visual_terms"):
+                video["visual_terms"] = [
+                    f"{video['topic']} healthy aging",
+                    f"{video['topic']} lifestyle",
+                    "older adults everyday activities",
+                    "healthy active lifestyle"
+                ]
+                print(f"Filled missing visual_terms locally: {video.get('title', 'untitled')}")
+
+            if not video.get("description"):
+                video["description"] = (
+                    f"{video['title']}\\n\\n"
+                    "This video is for educational purposes only and is not a substitute "
+                    "for professional medical advice."
+                )
+                print(f"Filled missing description locally: {video.get('title', 'untitled')}")
+
+            if not isinstance(video.get("tags"), list):
+                video["tags"] = []
 
             topic = normalize(video["topic"])
             title = normalize(video["title"])
