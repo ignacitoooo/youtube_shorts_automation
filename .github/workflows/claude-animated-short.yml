@@ -20,7 +20,7 @@ jobs:
       - name: Checkout feature branch
         uses: actions/checkout@v4
         with:
-          ref: feature/channel-growth-quality
+          ref: ${{ github.ref }}
           fetch-depth: 0
 
       - name: Check required secrets
@@ -87,6 +87,7 @@ jobs:
             exit 0
           fi
           git commit -m "Record Claude animated Short publication"
-          git fetch origin feature/channel-growth-quality
-          git rebase origin/feature/channel-growth-quality
-          git push origin HEAD:feature/channel-growth-quality
+          BRANCH="${GITHUB_REF_NAME}"
+          git fetch origin "$BRANCH"
+          git rebase "origin/$BRANCH"
+          git push origin "HEAD:$BRANCH"
