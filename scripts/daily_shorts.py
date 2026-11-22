@@ -265,8 +265,10 @@ def gemini_text(prompt):
                 url,
                 payload,
                 {"x-goog-api-key": key},
-                timeout=300,
-                max_attempts=3,
+                # Keep a slow provider from consuming most of the workflow runtime.
+                # Two bounded attempts are followed by the configured fallback model.
+                timeout=180,
+                max_attempts=2,
             )
             candidates = data.get("candidates", [])
             if not candidates:
@@ -282,10 +284,14 @@ def gemini_text(prompt):
             return text
         except RuntimeError as exc:
             last_error = exc
-            retryable_capacity_error = any(
-                marker in str(exc) for marker in ("HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")
+            retryable_provider_error = any(
+                marker in str(exc).lower()
+                for marker in (
+                    "http 408", "http 429", "http 500", "http 502", "http 503", "http 504",
+                    "network error", "timed out", "timeout", "urlopen error",
+                )
             )
-            if not retryable_capacity_error or index == len(models) - 1:
+            if not retryable_provider_error or index == len(models) - 1:
                 raise
             print(
                 f"Gemini model {model} is unavailable; switching to "
