@@ -298,19 +298,26 @@ def post_json(url, payload, headers, timeout=300, max_attempts=6):
 
 
 def gemini_text(prompt):
-    """Use the configured Gemini model, then an official Flash-Lite fallback on capacity errors."""
+    """Call Gemini with bounded retries and walk through configured model fallbacks."""
     key = os.environ["GEMINI_API_KEY"]
     fallback_models = [
         model.strip()
-        for model in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",")
+        for model in os.getenv(
+            "GEMINI_FALLBACK_MODELS",
+            "gemini-3.6-flash,gemini-3.5-flash-lite"
+        ).split(",")
         if model.strip() and model.strip() != GEMINI_MODEL
     ]
-    models = [GEMINI_MODEL] + fallback_models
+    models = list(dict.fromkeys([GEMINI_MODEL] + fallback_models))
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"responseMimeType": "application/json"},
     }
     last_error = None
+    retryable_markers = (
+        "HTTP 408", "HTTP 429", "HTTP 500", "HTTP 502",
+        "HTTP 503", "HTTP 504", "network error", "timed out",
+    )
 
     for index, model in enumerate(models):
         url = (
@@ -323,33 +330,31 @@ def gemini_text(prompt):
                 url,
                 payload,
                 {"x-goog-api-key": key},
-                timeout=300,
-                max_attempts=3,
+                timeout=360,
+                max_attempts=max(3, int(os.getenv("GEMINI_HTTP_ATTEMPTS", "5"))),
             )
             candidates = data.get("candidates", [])
             if not candidates:
                 raise RuntimeError(f"Gemini model {model} returned no candidate.")
-            text = "".join(
+            response_text = "".join(
                 part.get("text", "")
                 for part in candidates[0].get("content", {}).get("parts", [])
                 if isinstance(part, dict)
             ).strip()
-            if not text:
+            if not response_text:
                 raise RuntimeError(f"Gemini model {model} returned empty text.")
             print(f"Gemini response received from {model}.")
-            return text
+            return response_text
         except RuntimeError as exc:
             last_error = exc
-            retryable_capacity_error = any(
-                marker in str(exc) for marker in ("HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")
-            )
-            if not retryable_capacity_error or index == len(models) - 1:
+            is_transient = any(marker.lower() in str(exc).lower() for marker in retryable_markers)
+            if not is_transient or index == len(models) - 1:
                 raise
             print(
-                f"Gemini model {model} is unavailable; switching to "
-                f"{models[index + 1]} without using a paid provider."
+                f"Gemini model {model} remains unavailable after retries; "
+                f"trying fallback {models[index + 1]}."
             )
-            time.sleep(10)
+            time.sleep(min(20, 5 * (index + 1)))
 
     raise RuntimeError(f"All configured Gemini models failed: {last_error}")
 
