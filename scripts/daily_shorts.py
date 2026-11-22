@@ -356,7 +356,44 @@ def gemini_text(prompt):
             )
             time.sleep(min(20, 5 * (index + 1)))
 
-    raise RuntimeError(f"All configured Gemini models failed: {last_error}")
+    # Final provider fallback: Claude can produce the same JSON content contract.
+    # This keeps temporary Gemini outages from stopping the whole daily batch.
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        print("Gemini model chain exhausted; trying Claude as the content-generation fallback.")
+        anthropic_payload = {
+            "model": os.getenv("CLAUDE_FALLBACK_MODEL", "claude-sonnet-5-5"),
+            "max_tokens": 7000,
+            "temperature": 0.4,
+            "system": "You are an evidence-based health-content writer. Follow the user's JSON schema exactly. Return JSON only.",
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        try:
+            data = post_json(
+                "https://api.anthropic.com/v1/messages",
+                anthropic_payload,
+                {"x-api-key": anthropic_key, "anthropic-version": "2026-10-21"},
+                timeout=360,
+                max_attempts=4,
+            )
+            response_text = "".join(
+                block.get("text", "")
+                for block in data.get("content", [])
+                if block.get("type") == "text"
+            ).strip()
+            if response_text:
+                print("Claude fallback response received.")
+                return response_text
+            raise RuntimeError("Claude fallback returned empty text.")
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"Gemini model chain and Claude fallback both failed. "
+                f"Last Gemini error: {last_error}; Claude error: {exc}"
+            ) from exc
+
+    raise RuntimeError(
+        f"All configured Gemini models failed and ANTHROPIC_API_KEY is not configured: {last_error}"
+    )
 
 
 def grok_review(draft, articles):
