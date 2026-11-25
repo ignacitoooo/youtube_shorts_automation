@@ -409,9 +409,24 @@ def call_openrouter(feed_items, history):
     ]
     prompt = f"""
 You write evidence-based YouTube Shorts for adults 50+, in natural American English.
+EDITORIAL FOCUS FOR UPCOMING VIDEOS: prioritize fresh, closely related angles on
+nutrition and healthy aging, especially protein intake, amino-acid balance, muscle
+preservation, dietary patterns, and metabolic aging. Prefer at least TWO of the
+three Shorts to explore distinct angles in this cluster when the supplied research
+articles genuinely support them; the horizontal video may also cover a distinct
+related angle. Do NOT repeat the already-covered headline "eating less protein
+could slow aging" or the prior angle about protein source and testosterone. Choose
+new, specific questions such as how protein needs change with age, balancing
+muscle preservation with metabolic health, or what evidence says about amino-acid
+quality. If the supplied articles do not support a claim or angle, choose another
+well-supported healthy-aging topic instead. Never invent research or force a
+protein angle without a relevant supplied source.
 Create exactly THREE distinct scripts, each 85-120 spoken words, with a strong
 first-3-second hook, practical value early, accurate claims, and 8-12 ordered
-Pexels search phrases. Avoid medical diagnosis, cures, invented statistics,
+Pexels search phrases. Use a visually concrete, natural documentary style: real
+people, food, kitchens, gardens, everyday activity and close-up details where
+relevant; avoid generic stock-footage concepts and avoid relying on one repeated
+visual motif. Avoid medical diagnosis, cures, invented statistics,
 unsupported causal claims, and advice to change medication. Use only supplied
 articles and exact source URLs. Include this disclaimer in every description:
 "This video is for educational purposes only and is not a substitute for professional medical advice."
@@ -448,6 +463,11 @@ Return JSON only in the shape {{"videos":[...],"long_video":{{...}}}}.
 
     print("Gemini is preparing the final scripts...")
     final_prompt = (
+        "Preserve the requested editorial focus on fresh nutrition-and-healthy-aging angles, "
+        "especially protein, amino-acid balance, muscle preservation and metabolic aging, "
+        "when the supplied verified articles support them. Do not repeat the previously covered "
+        "general low-protein-aging or protein-source/testosterone angles. Keep the visual direction "
+        "documentary and concrete, using varied real-life scenes relevant to each script. "
         "Revise this draft using the reviewer feedback when available. Keep exactly three Shorts "
         "and exactly one long_video. Shorts must be 85-120 words. The long_video must be "
         "600-750 words for approximately five minutes of narration, with fields "
