@@ -248,7 +248,7 @@ def gemini_text(prompt):
         model.strip()
         for model in os.getenv(
             "GEMINI_FALLBACK_MODELS",
-            "gemini-3.5-flash-lite,gemini-3.6-flash"
+            "gemini-3.5-flash-lite,gemini-3.7-flash"
         ).split(",")
         if model.strip() and model.strip() != GEMINI_MODEL
     ]
@@ -542,6 +542,10 @@ def repair_long_video_script(item, feed_items, valid_urls):
 
 def validate_long_video(result, feed_items, history, shorts):
     item = result.get("long_video")
+    # Topic is classification metadata; use the title as a fallback if omitted.
+    if isinstance(item, dict) and not item.get("topic") and item.get("title"):
+        item["topic"] = item["title"].strip()
+        print(f"Derived missing long-video topic from title: {item['title']}")
     required = ["topic", "title", "script", "visual_terms", "description", "source_urls", "tags"]
     if not isinstance(item, dict) or not all(item.get(key) for key in required):
         raise RuntimeError("Gemini did not provide a complete long_video object.")
@@ -694,6 +698,13 @@ def validate_videos(result, feed_items, history):
                 continue
             # Topic, title, narration and traceable sources are essential.
             # Metadata can be safely completed locally if Gemini omits it.
+            # Topic is classification metadata, not narration or source evidence.
+            # Derive it from the generated title if Gemini omits it, rather than
+            # discarding an otherwise complete, source-backed Short.
+            if not video.get("topic") and video.get("title"):
+                video["topic"] = video["title"].strip()
+                print(f"Derived missing topic from title: {video['title']}")
+
             essential = ["topic", "title", "script", "source_urls"]
             missing = [key for key in essential if not video.get(key)]
             if missing:
