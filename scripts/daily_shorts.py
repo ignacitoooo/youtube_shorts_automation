@@ -532,11 +532,11 @@ def repair_long_video_script(item, feed_items, valid_urls):
         # Enforce the hard word limit locally: Gemini can exceed its requested
         # length substantially. Keep only complete sentences that fit the budget.
         max_additional_words = 750 - current_words
-        sentences = re.split(r"(?<=[.!?])\\s+", continuation.strip())
+        sentences = re.split(r"(?<=[.!?])\s+", continuation.strip())
         accepted_parts = []
         accepted_count = 0
         for sentence in sentences:
-            sentence_count = len(re.findall(r"\\b[\\w'-]+\\b", sentence))
+            sentence_count = len(re.findall(r"\b[\w'-]+\b", sentence))
             if accepted_count + sentence_count > max_additional_words:
                 break
             accepted_parts.append(sentence)
@@ -547,8 +547,8 @@ def repair_long_video_script(item, feed_items, valid_urls):
             print("Gemini continuation did not fit the remaining word budget.")
             continue
 
-        script = script + "\\n\\n" + bounded_continuation
-        new_count = len(re.findall(r"\\b[\\w'-]+\\b", script))
+        script = script + "\n\n" + bounded_continuation
+        new_count = len(re.findall(r"\b[\w'-]+\b", script))
         print(f"Combined long-video script now has {new_count} words after enforcing the 750-word limit.")
         if 600 <= new_count <= 750:
             item["script"] = script
