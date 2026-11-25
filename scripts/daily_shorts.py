@@ -494,13 +494,17 @@ def repair_long_video_script(item, feed_items, valid_urls):
                 f"Long video script has {current_words} words after repair; expected 600-750. Nothing will be uploaded."
             )
 
-        target_addition = min(230, max(120, 650 - current_words))
+        # Aim for a modest addition. The previous 120-word minimum caused
+        # overshoots when Gemini returned a much longer continuation than requested.
+        target_addition = max(40, min(120, 680 - current_words))
         prompt = (
             "Continue the narration below. Do NOT rewrite or summarize the existing script. "
             "Return JSON only with exactly one string field named continuation. "
-            f"Write approximately {target_addition} new words, as 2-3 coherent paragraphs, "
+            f"Write approximately {target_addition} new words, as 1-2 coherent paragraphs, "
             "that can be appended directly to the end of the existing narration. "
-            "The completed combined script must be 620-700 words, and must never exceed 750. "
+            f"The completed combined script should be about 650-690 words. "
+            f"Keep the continuation under {max(1, 750 - current_words)} words; "
+            "the completed script must never exceed 750 words. "
             "Add useful explanation, context, practical implications and a natural conclusion. "
             "Use ONLY facts explicitly supported by the verified source articles below. "
             "Do not invent statistics, diagnoses, cures, causal claims or medication advice. "
@@ -525,9 +529,27 @@ def repair_long_video_script(item, feed_items, valid_urls):
             print("Gemini returned no usable continuation.")
             continue
 
-        script = script + "\n\n" + continuation.strip()
-        new_count = len(re.findall(r"\b[\w'-]+\b", script))
-        print(f"Combined long-video script now has {new_count} words.")
+        # Enforce the hard word limit locally: Gemini can exceed its requested
+        # length substantially. Keep only complete sentences that fit the budget.
+        max_additional_words = 750 - current_words
+        sentences = re.split(r"(?<=[.!?])\\s+", continuation.strip())
+        accepted_parts = []
+        accepted_count = 0
+        for sentence in sentences:
+            sentence_count = len(re.findall(r"\\b[\\w'-]+\\b", sentence))
+            if accepted_count + sentence_count > max_additional_words:
+                break
+            accepted_parts.append(sentence)
+            accepted_count += sentence_count
+
+        bounded_continuation = " ".join(accepted_parts).strip()
+        if not bounded_continuation:
+            print("Gemini continuation did not fit the remaining word budget.")
+            continue
+
+        script = script + "\\n\\n" + bounded_continuation
+        new_count = len(re.findall(r"\\b[\\w'-]+\\b", script))
+        print(f"Combined long-video script now has {new_count} words after enforcing the 750-word limit.")
         if 600 <= new_count <= 750:
             item["script"] = script
             item["source_urls"] = list(valid_urls)
