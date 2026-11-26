@@ -1289,37 +1289,50 @@ def main():
     pending = load_pending()
     videos = list(pending)
 
+    # A pending horizontal video must never suppress the daily Shorts batch.
+    # Top up the queue independently by format: keep pending items, add Shorts
+    # until there are three, and add one horizontal video only if none is queued.
+    pending_shorts = [
+        item for item in videos
+        if item.get("_video_format", "short") == "short"
+    ]
+    has_pending_long = any(
+        item.get("_video_format", "short") == "long"
+        for item in videos
+    )
+
     if videos:
         print(f"Found {len(videos)} pending video(s); retrying them first.")
-        has_pending_long = any(
-            item.get("_video_format", "short") == "long"
-            for item in videos
-        )
-        if not has_pending_long:
-            print("Pending queue has no horizontal video; generating one to add to the same queue.")
-            feed_items = get_research()
-            fresh_result = call_openrouter(feed_items, history)
-            fresh_shorts = validate_videos(fresh_result, feed_items, history)
-            long_video = validate_long_video(
-                fresh_result, feed_items, history, fresh_shorts
-            )
-            long_video["_video_format"] = "long"
-            videos.append(long_video)
-    else:
+    if len(pending_shorts) < 3 or not has_pending_long:
         feed_items = get_research()
         result = call_openrouter(feed_items, history)
-        shorts = validate_videos(result, feed_items, history)
-        long_video = validate_long_video(result, feed_items, history, shorts)
 
-        videos = []
-        for item in shorts:
-            queued = dict(item)
-            queued["_video_format"] = "short"
-            videos.append(queued)
+        missing_shorts = max(0, 3 - len(pending_shorts))
+        if missing_shorts:
+            print(
+                f"Queue contains {len(pending_shorts)} pending Short(s); "
+                f"generating {missing_shorts} additional Short(s)."
+            )
+            new_shorts = validate_videos(
+                result, feed_items, history, target_count=missing_shorts
+            )
+            for item in new_shorts:
+                queued = dict(item)
+                queued["_video_format"] = "short"
+                videos.append(queued)
 
-        queued_long = dict(long_video)
-        queued_long["_video_format"] = "long"
-        videos.append(queued_long)
+        if not has_pending_long:
+            print("No horizontal video is pending; generating one.")
+            current_shorts = [
+                item for item in videos
+                if item.get("_video_format", "short") == "short"
+            ]
+            long_video = validate_long_video(
+                result, feed_items, history, current_shorts
+            )
+            queued_long = dict(long_video)
+            queued_long["_video_format"] = "long"
+            videos.append(queued_long)
 
     if len(videos) == 0:
         raise RuntimeError("No videos available to process.")
