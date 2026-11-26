@@ -747,6 +747,35 @@ def validate_videos(result, feed_items, history, target_count=3):
                 video["topic"] = video["title"].strip()
                 print(f"Derived missing topic from title: {video['title']}")
 
+            # A fallback Gemini model may omit source_urls even when the script
+            # was drafted from the supplied research. Recover citations in one
+            # bounded metadata-only call; exact-URL allowlist validation remains
+            # authoritative and rejects invented or unrelated sources.
+            if (
+                not video.get("source_urls")
+                and video.get("title")
+                and video.get("script")
+            ):
+                source_prompt = (
+                    'Select the exact source URL(s) from the supplied articles that directly '
+                    'support this Short. Return JSON only: {"source_urls":[...]}. '
+                    'Copy URLs verbatim; never invent URLs. If none directly supports it, '
+                    'return an empty array. Do not rewrite the title or script.\\n\\n'
+                    'TITLE: ' + str(video["title"]) + '\\nSCRIPT: '
+                    + str(video["script"]) + '\\nARTICLES: '
+                    + json.dumps(feed_items, ensure_ascii=False)
+                )
+                try:
+                    source_result = parse_gemini_json(
+                        gemini_text(source_prompt), "Short source metadata repair"
+                    )
+                    proposed_sources = source_result.get("source_urls")
+                    if isinstance(proposed_sources, list):
+                        video["source_urls"] = proposed_sources
+                        print("Recovered Short source metadata; exact-URL validation will follow.")
+                except Exception as exc:
+                    print(f"Short source metadata repair failed: {exc}")
+
             essential = ["topic", "title", "script", "source_urls"]
             missing = [key for key in essential if not video.get(key)]
             if missing:
