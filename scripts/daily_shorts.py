@@ -1199,9 +1199,32 @@ def upload_one(youtube, item, video_path):
     )
 
     response = None
+    consecutive_network_failures = 0
 
     while response is None:
-        status, response = request.next_chunk()
+        try:
+            # Reuse the same resumable request after a transport interruption.
+            # This lets YouTube report the committed byte range instead of
+            # creating a second videos.insert request.
+            status, response = request.next_chunk()
+            consecutive_network_failures = 0
+        except OSError as exc:
+            consecutive_network_failures += 1
+            if consecutive_network_failures > 3:
+                print(
+                    "YouTube upload transport failed after 3 retries: "
+                    f"{exc}"
+                )
+                raise
+
+            delay = min(5 * (2 ** (consecutive_network_failures - 1)), 20)
+            print(
+                "Transient network error during YouTube upload; "
+                f"retrying the existing resumable session in {delay}s "
+                f"(retry {consecutive_network_failures}/3): {exc}"
+            )
+            time.sleep(delay)
+            continue
 
         if status:
             print(
@@ -1288,51 +1311,65 @@ def main():
     # format marker are treated as Shorts for backwards compatibility.
     pending = load_pending()
     videos = list(pending)
-
-    # A pending horizontal video must never suppress the daily Shorts batch.
-    # Top up the queue independently by format: keep pending items, add Shorts
-    # until there are three, and add one horizontal video only if none is queued.
-    pending_shorts = [
-        item for item in videos
-        if item.get("_video_format", "short") == "short"
-    ]
-    has_pending_long = any(
-        item.get("_video_format", "short") == "long"
-        for item in videos
+    retry_pending_only = (
+        os.getenv("RETRY_PENDING_ONLY", "false").strip().lower()
+        in {"1", "true", "yes"}
     )
 
-    if videos:
-        print(f"Found {len(videos)} pending video(s); retrying them first.")
-    if len(pending_shorts) < 3 or not has_pending_long:
-        feed_items = get_research()
-        result = call_openrouter(feed_items, history)
+    if retry_pending_only:
+        if not videos:
+            raise RuntimeError(
+                "RETRY_PENDING_ONLY is enabled but the pending queue is empty."
+            )
+        print(
+            "RETRY_PENDING_ONLY enabled: processing the existing queue "
+            "without researching or generating additional videos."
+        )
+    else:
+        # A pending horizontal video must never suppress the daily Shorts batch.
+        # Top up the queue independently by format: keep pending items, add Shorts
+        # until there are three, and add one horizontal video only if none is queued.
+        pending_shorts = [
+            item for item in videos
+            if item.get("_video_format", "short") == "short"
+        ]
+        has_pending_long = any(
+            item.get("_video_format", "short") == "long"
+            for item in videos
+        )
 
-        missing_shorts = max(0, 3 - len(pending_shorts))
-        if missing_shorts:
-            print(
-                f"Queue contains {len(pending_shorts)} pending Short(s); "
-                f"generating {missing_shorts} additional Short(s)."
-            )
-            new_shorts = validate_videos(
-                result, feed_items, history, target_count=missing_shorts
-            )
-            for item in new_shorts:
-                queued = dict(item)
-                queued["_video_format"] = "short"
-                videos.append(queued)
+        if videos:
+            print(f"Found {len(videos)} pending video(s); retrying them first.")
+        if len(pending_shorts) < 3 or not has_pending_long:
+            feed_items = get_research()
+            result = call_openrouter(feed_items, history)
 
-        if not has_pending_long:
-            print("No horizontal video is pending; generating one.")
-            current_shorts = [
-                item for item in videos
-                if item.get("_video_format", "short") == "short"
-            ]
-            long_video = validate_long_video(
-                result, feed_items, history, current_shorts
-            )
-            queued_long = dict(long_video)
-            queued_long["_video_format"] = "long"
-            videos.append(queued_long)
+            missing_shorts = max(0, 3 - len(pending_shorts))
+            if missing_shorts:
+                print(
+                    f"Queue contains {len(pending_shorts)} pending Short(s); "
+                    f"generating {missing_shorts} additional Short(s)."
+                )
+                new_shorts = validate_videos(
+                    result, feed_items, history, target_count=missing_shorts
+                )
+                for item in new_shorts:
+                    queued = dict(item)
+                    queued["_video_format"] = "short"
+                    videos.append(queued)
+
+            if not has_pending_long:
+                print("No horizontal video is pending; generating one.")
+                current_shorts = [
+                    item for item in videos
+                    if item.get("_video_format", "short") == "short"
+                ]
+                long_video = validate_long_video(
+                    result, feed_items, history, current_shorts
+                )
+                queued_long = dict(long_video)
+                queued_long["_video_format"] = "long"
+                videos.append(queued_long)
 
     if len(videos) == 0:
         raise RuntimeError("No videos available to process.")
