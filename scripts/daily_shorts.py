@@ -502,7 +502,7 @@ def repair_long_video_script(item, feed_items, valid_urls):
         )
 
     script = item["script"].strip()
-    for attempt in range(1, 3):
+    for attempt in range(1, 5):
         current_words = len(re.findall(r"\b[\w'-]+\b", script))
         if 600 <= current_words <= 750:
             item["script"] = script
@@ -516,7 +516,7 @@ def repair_long_video_script(item, feed_items, valid_urls):
 
         # Aim for a modest addition. The previous 120-word minimum caused
         # overshoots when Gemini returned a much longer continuation than requested.
-        target_addition = max(40, min(120, 680 - current_words))
+        target_addition = max(100, min(180, 680 - current_words))
         prompt = (
             "Continue the narration below. Do NOT rewrite or summarize the existing script. "
             "Return JSON only with exactly one string field named continuation. "
@@ -537,7 +537,7 @@ def repair_long_video_script(item, feed_items, valid_urls):
             + "\n\nEXISTING SCRIPT (continue from its ending):\n" + script
         )
         print(
-            f"Requesting evidence-based long-video continuation ({attempt}/2); "
+            f"Requesting evidence-based long-video continuation ({attempt}/4); "
             f"current length: {current_words} words."
         )
         repaired = parse_gemini_json(
