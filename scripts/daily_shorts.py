@@ -716,7 +716,7 @@ def repair_short_script(video, feed_items, valid_urls):
     )
 
 
-def validate_videos(result, feed_items, history):
+def validate_videos(result, feed_items, history, target_count=3):
     """Accept three unique, source-backed Shorts; ask Gemini for replacements when needed."""
     videos = result.get("videos", [])
     if not isinstance(videos, list):
@@ -734,7 +734,7 @@ def validate_videos(result, feed_items, history):
 
     def inspect_candidates(candidates):
         for video in candidates:
-            if len(accepted) == 3:
+            if len(accepted) >= target_count:
                 break
             if not isinstance(video, dict):
                 continue
@@ -821,7 +821,7 @@ def validate_videos(result, feed_items, history):
     # Gemini sometimes ignores the exclusion list. Generate fresh replacements
     # instead of weakening duplicate-topic/title or source-verification rules.
     for attempt in range(1, 3):
-        missing = 3 - len(accepted)
+        missing = target_count - len(accepted)
         if missing <= 0:
             break
 
@@ -860,9 +860,9 @@ def validate_videos(result, feed_items, history):
         if len(accepted) == before_count:
             print("No new valid Shorts accepted in this replacement attempt.")
 
-    if len(accepted) != 3:
+    if len(accepted) != target_count:
         raise RuntimeError(
-            f"Only {len(accepted)} valid unique Shorts passed validation after two replacement attempts. "
+            f"Only {len(accepted)} of {target_count} requested valid unique Shorts passed validation after two replacement attempts. "
             "Duplicate and source protections remain enabled. Nothing will be uploaded."
         )
 
