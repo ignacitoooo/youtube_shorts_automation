@@ -3,6 +3,11 @@ name: The Healthy Years 404 - Gemini - Daily YouTube Publishing
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/generar-videos.yml
   schedule:
     - cron: "0 6 * * *"
 
@@ -108,6 +113,7 @@ jobs:
           VIDEO_WORKDIR: MoneyPrinterTurbo
           DRY_RUN: "false"
           GROK_REVIEW_ENABLED: "false"
+          RETRY_PENDING_ONLY: "true"
         run: python scripts/daily_shorts.py
 
       - name: Save generated videos as artifacts
